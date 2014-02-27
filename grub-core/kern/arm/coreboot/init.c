@@ -41,7 +41,7 @@ extern grub_uint8_t _edata[];
 grub_addr_t start_of_ram = ~(grub_addr_t)0;
 
 void  __attribute__ ((noreturn))
-grub_exit (void)
+grub_exit (int rc __attribute__((unused)))
 {
   /* We can't use grub_fatal() in this function.  This would create an infinite
      loop, since grub_fatal() calls grub_abort() which in turn calls grub_exit().  */
