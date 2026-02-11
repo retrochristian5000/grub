@@ -687,6 +687,48 @@ backward_char (struct screen *screen, int update)
 }
 
 static int
+forward_word (struct screen *screen, int update)
+{
+  int prev_column = screen->column;
+  struct line *linep;
+
+  linep = screen->lines + screen->line;
+  while (screen->column < linep->len && grub_isspace (linep->buf[screen->column]))
+    ++screen->column;
+  while (screen->column < linep->len && grub_isalnum (linep->buf[screen->column]))
+    ++screen->column;
+  if (prev_column == screen->column)
+    {
+      if (! forward_char (screen, 0))
+	return 0;
+    }
+  if (update)
+    update_screen_all (screen, screen->num_lines, 0, 0, 0, NO_LINE);
+  return 1;
+}
+
+static int
+backward_word (struct screen *screen, int update)
+{
+  int prev_column = screen->column;
+  struct line *linep;
+
+  linep = screen->lines + screen->line;
+  while (screen->column > 0 && grub_isspace (linep->buf[screen->column - 1]))
+    screen->column--;
+  while (screen->column > 0 && grub_isalnum (linep->buf[screen->column - 1]))
+    screen->column--;
+  if (prev_column == screen->column)
+    {
+      if (! backward_char (screen, 0))
+	return 0;
+    }
+  if (update)
+    update_screen_all (screen, screen->num_lines, 0, 0, 0, NO_LINE);
+  return 1;
+}
+
+static int
 previous_line (struct screen *screen, int update)
 {
   if (screen->line > 0)
@@ -867,6 +909,88 @@ backward_delete_char (struct screen *screen, int update)
       return 0;
 
   return 1;
+}
+
+static int
+delete_word (struct screen *screen, int swap_whitespace, int update)
+{
+  struct line *linep;
+  unsigned i;
+  int del;
+
+  linep = screen->lines + screen->line;
+  for (i = 0; i < screen->nterms; i++)
+    screen->terms[i].orig_num =
+      get_logical_num_lines (linep, &screen->terms[i]);
+
+  del = 0;
+  if (swap_whitespace)
+    {
+      while (screen->column + del < linep->len
+	     && grub_isalnum (linep->buf[screen->column + del]))
+	del++;
+      while (screen->column + del < linep->len
+	     && grub_isspace (linep->buf[screen->column + del]))
+	del++;
+    }
+  else
+    {
+      while (screen->column + del < linep->len
+	     && grub_isspace (linep->buf[screen->column + del]))
+	del++;
+      while (screen->column + del < linep->len
+	     && grub_isalnum (linep->buf[screen->column + del]))
+	del++;
+    }
+
+  if (del == 0)
+    {
+      if (!delete_char (screen, update))
+	return 0;
+    }
+  else
+    {
+      grub_memmove (linep->buf + screen->column,
+		    linep->buf + screen->column + del,
+		    (linep->len - screen->column -
+		     del) * sizeof (linep->buf[0]));
+      linep->len -= del;
+
+      for (i = 0; i < screen->nterms; i++)
+	{
+	  grub_free (linep->pos[i]);
+	  linep->pos[i] = 0;
+	}
+
+      screen->real_column = screen->column;
+
+      if (update)
+	{
+	  for (i = 0; i < screen->nterms; i++)
+	    {
+	      int new_num;
+	      new_num = get_logical_num_lines (linep, &screen->terms[i]);
+	      if (screen->terms[i].orig_num != new_num)
+		update_screen (screen, &screen->terms[i],
+			       screen->line, screen->column, 0, 0, ALL_LINES);
+	      else
+		update_screen (screen, &screen->terms[i],
+			       screen->line, screen->column, 0, 0,
+			       SINGLE_LINE);
+	    }
+	}
+    }
+  return 1;
+}
+
+static int
+backward_delete_word (struct screen *screen, int update)
+{
+  if (screen->line == 0 && screen->column == 0)
+    return 1;
+  if (!backward_word (screen, 0))
+    return 0;
+  return delete_word (screen, 1, update);
 }
 
 static int
@@ -1434,6 +1558,27 @@ grub_menu_entry_run (grub_menu_entry_t entry)
 	case GRUB_TERM_CTRL | 's':
 	case GRUB_TERM_CTRL | 't':
 	  /* FIXME */
+	  break;
+
+	case GRUB_TERM_CTRL | GRUB_TERM_KEY_LEFT:
+	  if (! backward_word (screen, 1))
+	    goto fail;
+	  break;
+
+	case GRUB_TERM_CTRL | GRUB_TERM_KEY_RIGHT:
+	  if (! forward_word (screen, 1))
+	    goto fail;
+	  break;
+
+	case GRUB_TERM_CTRL | 'w':
+	case GRUB_TERM_ALT | GRUB_TERM_BACKSPACE:
+	  if (! backward_delete_word (screen, 1))
+	    goto fail;
+	  break;
+
+	case GRUB_TERM_CTRL | GRUB_TERM_KEY_DC:
+	  if (! delete_word (screen, 0, 1))
+	    goto fail;
 	  break;
 
 	default:
