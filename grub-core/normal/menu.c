@@ -498,7 +498,8 @@ static int
 get_entry_number (grub_menu_t menu, const char *name)
 {
   const char *val;
-  int entry;
+  char *val_dup, *ext;
+  int entry, res;
 
   val = grub_env_get (name);
   if (! val)
@@ -524,6 +525,26 @@ get_entry_number (grub_menu_t menu, const char *name)
 	      entry = i;
 	      break;
 	    }
+
+	  if (e->blsuki)
+	    {
+	      ext = grub_strrchr (val, '.');
+	      if (ext && grub_strcmp (ext, ".conf") == 0)
+		{
+		  val_dup = grub_strndup(val, ext - val);
+		  if (val_dup)
+		    {
+		      res = menuentry_eq (e->id, val);
+                      grub_free (val_dup);
+		    }
+		  if (res)
+		    {
+		      entry = i;
+		      break;
+		    }
+		}
+	    }
+
 	  e = e->next;
 	}
 
