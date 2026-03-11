@@ -44,7 +44,8 @@ grub_err_t (*grub_gfxmenu_try_hook) (int entry, grub_menu_t menu,
 enum timeout_style {
   TIMEOUT_STYLE_MENU,
   TIMEOUT_STYLE_COUNTDOWN,
-  TIMEOUT_STYLE_HIDDEN
+  TIMEOUT_STYLE_HIDDEN,
+  TIMEOUT_STYLE_DISABLED
 };
 
 struct timeout_style_name {
@@ -54,6 +55,7 @@ struct timeout_style_name {
   {"menu", TIMEOUT_STYLE_MENU},
   {"countdown", TIMEOUT_STYLE_COUNTDOWN},
   {"hidden", TIMEOUT_STYLE_HIDDEN},
+  {"disabled", TIMEOUT_STYLE_DISABLED},
   {NULL, 0}
 };
 
@@ -679,10 +681,11 @@ run_menu (grub_menu_t menu, int nested, int *auto_boot, int *notify_boot)
     }
 
   /* If timeout is 0, drawing is pointless (and ugly).  */
-  if (timeout == 0)
+  if (timeout == 0 || timeout_style == TIMEOUT_STYLE_DISABLED)
     {
       *auto_boot = 1;
-      *notify_boot = timeout_style != TIMEOUT_STYLE_HIDDEN;
+      *notify_boot = timeout_style != TIMEOUT_STYLE_HIDDEN
+                     && timeout_style != TIMEOUT_STYLE_DISABLED;
       return default_entry;
     }
 

@@ -196,6 +196,84 @@ set_loader_default_entry (void)
     }
 }
 
+/* Parse the timeout according to the Boot Loader Interface spec
+   for LoaderConfigTimeout and LoaderConfigTimeoutOneShot.
+   Return true when the timeout has been set. */
+static int
+parse_timeout_bli (const char* config_timeout, bool is_oneshot)
+{
+  unsigned int timeout;
+  /* When the timeout is set to menu-force or LoaderConfigTimeoutOneShot is
+     set to 0, show the menu indefinitely */
+  if (grub_strcmp (config_timeout, "menu-force") == 0
+          || (is_oneshot && grub_strcmp (config_timeout, "0") == 0))
+    {
+      grub_env_unset ("timeout");
+      grub_env_set ("timeout_style", "menu");
+      /* When set to 0 or to menu-hidden, don't show the menu but wait until the
+         timeout expires. Allow the user to interrupt the boot and show the menu */
+    } else if (grub_strcmp (config_timeout, "0") == 0
+	    || grub_strcmp (config_timeout, "menu-hidden") == 0)
+    {
+      grub_menu_set_timeout (3);
+      grub_env_set ("timeout_style", "hidden");
+      /* When set to to menu-disabled, don't show the menu and boot the default
+         entry directly. Don't allow the user to interrupt the bootloader. */
+    } else if (grub_strcmp (config_timeout, "menu-disabled") == 0)
+    {
+      grub_env_set ("timeout", "0");
+      grub_env_set ("timeout_style", "disabled");
+    } else {
+      timeout = grub_strtoul (config_timeout, 0, 10);
+      if (grub_errno == GRUB_ERR_NONE)
+	{
+          /* In previous versions of bootctl, timeout is set to GRUB_UINT_MAX
+             instead of menu-force */
+	  if (timeout == GRUB_UINT_MAX)
+	    grub_env_unset ("timeout");
+	  else
+	    grub_menu_set_timeout (timeout);
+
+	  grub_env_set ("timeout_style", "menu");
+	} else {
+	  grub_errno = GRUB_ERR_NONE;
+          return false;
+	}
+    }
+
+    return true;
+}
+
+/* Read LoaderConfigTimeout and LoaderConfigTimeoutOneShot and update
+   timeout accordingly */
+static void
+set_timeout_from_loader_config (void)
+{
+  bool has_oneshot = false;
+  char* config_timeout = get_efivar ("LoaderConfigTimeoutOneShot");
+  if (config_timeout)
+  {
+    /* Remove its value, regardless if it is valid or not */
+    grub_efi_set_variable_to_string ("LoaderConfigTimeoutOneShot",
+	    &bli_vendor_guid, "", 0);
+
+    has_oneshot = parse_timeout_bli (config_timeout, true);
+    grub_free (config_timeout);
+  }
+
+  if (has_oneshot)
+    return;
+
+  /* If there was no LoaderConfigTimeoutOneShot value or it was invalid,
+     read LoaderConfigTimeout */
+  config_timeout = get_efivar ("LoaderConfigTimeout");
+  if (!config_timeout)
+    return;
+
+  parse_timeout_bli (config_timeout, false);
+  grub_free (config_timeout);
+}
+
 GRUB_MOD_INIT (bli)
 {
   grub_efi_set_variable_to_string ("LoaderInfo", &bli_vendor_guid, PACKAGE_STRING,
@@ -204,6 +282,7 @@ GRUB_MOD_INIT (bli)
   set_loader_device_part_uuid ();
   set_loader_active_pcr_banks ();
   set_loader_default_entry ();
+  set_timeout_from_loader_config ();
   /* No error here is critical, other than being logged */
   grub_print_error ();
 }
