@@ -885,6 +885,12 @@ module = {
   cppflags = '$(CPPFLAGS_POSIX) $(CPPFLAGS_GNULIB)';
 };
 
+ module = {
+  name = bls_bumpcounter;
+  efi = commands/bls_bumpcounter.c;
+  enable = efi;
+};
+
 module = {
   name = boot;
   common = commands/boot.c;
