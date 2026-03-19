@@ -251,6 +251,42 @@ blsuki_get_val (grub_blsuki_entry_t *entry, const char *keyname, int *last)
   return ret;
 }
 
+/* Return the tries left of an entry with boot counting enabled.
+   When boot counting is disabled, return -1. */
+static long
+tries_left (const char *filename)
+{
+  char *tries_left_str;
+  long ret = -1;
+  char *str = grub_strdup (filename);
+
+  if (str == NULL)
+    return -1;
+
+  /* Search for the start of the tries left, as per boot assessment */
+  tries_left_str = grub_strrchr (str, '+');
+
+  if (tries_left_str != NULL)
+    {
+      const char *end;
+      long tries;
+
+      ++tries_left_str;
+      tries = grub_strtol (tries_left_str, (const char **) &end, 10);
+
+      if (grub_errno == GRUB_ERR_NONE)
+	{
+	  if (*end == '-' || *end == '.')
+	    ret = tries;
+	}
+      else
+	grub_errno = GRUB_ERR_NONE;
+    }
+
+  grub_free (str);
+  return ret;
+}
+
 /*
  * Add a new grub_blsuki_entry_t struct to the entries list and sort it's
  * position on the list.
@@ -259,7 +295,7 @@ static grub_err_t
 blsuki_add_entry (grub_blsuki_entry_t *entry)
 {
   grub_blsuki_entry_t *e, *last = NULL;
-  int rc;
+  int rc, t1, t2;
 
   if (entries == NULL)
     {
@@ -273,6 +309,14 @@ blsuki_add_entry (grub_blsuki_entry_t *entry)
       rc = filevercmp (entry->filename, e->filename);
       if (rc == 0)
 	return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("duplicate file: `%s'"), entry->filename);
+
+      /* Entries with 0 tries left should be put below the rest */
+      t1 = tries_left (entry->filename);
+      t2 = tries_left (e->filename);
+      if (t2 == 0 && t1 != 0)
+	rc = 1;
+      else if (t2 != 0 && t1 == 0)
+	rc = -1;
 
       if (rc > 0)
 	{
