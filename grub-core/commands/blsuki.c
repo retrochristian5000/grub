@@ -1520,7 +1520,7 @@ set_bli_loader_entries (enum blsuki_cmd_type cmd_type)
   prev_entries = prev_entries_start;
   prev_entries_size = prev_entries_start_size;
   p = efi_entries;
-  remaining_size = size;
+  remaining_size = size + (prev_entries_start_size / sizeof (*efi_entries));
   /* Create a null separated list of all entries (with the extension removed) */
   FOR_BLSUKI_ENTRIES (entry)
     {
@@ -1583,9 +1583,39 @@ set_bli_loader_entries (enum blsuki_cmd_type cmd_type)
 	}
     }
 
+    /*
+     * Append any entries left unconsumed in prev_entries after the ordered
+     * merge above. Previous entries are only emitted immediately when they
+     * sort before the current new entry; otherwise they remain pending until
+     * here.
+     */
+    if (prev_entries_size != 0 && prev_entries != NULL)
+      {
+	grub_size_t remaining_entries_size;
+
+	remaining_entries_size = prev_entries_size / sizeof (*prev_entries);
+	/*
+	 * remaining_size is tracked in UTF-16 code units, so compare it
+	 * against the number of UTF-16 elements left in the previous buffer.
+	 */
+	if (remaining_size < remaining_entries_size)
+	  {
+	    grub_free (prev_entries_start);
+	    grub_free (efi_entries);
+	    return grub_error (
+		GRUB_ERR_OUT_OF_RANGE,
+		"LoaderEntries buffer too small for previous entries");
+	  }
+
+	grub_memcpy (p, prev_entries, prev_entries_size);
+	p += remaining_entries_size;
+	remaining_size -= remaining_entries_size;
+	prev_entries_size = 0;
+      }
+
   status = grub_efi_set_variable_with_attributes ("LoaderEntries", &bli_vendor_guid,
 					 efi_entries,
-					 size * sizeof (grub_efi_char16_t) + prev_entries_start_size - prev_entries_size,
+					 (p - efi_entries) * sizeof (*efi_entries),
 					 GRUB_EFI_VARIABLE_BOOTSERVICE_ACCESS |
 					 GRUB_EFI_VARIABLE_RUNTIME_ACCESS);
   /* Record that we set the generated entries by this command to LoaderEntries */
