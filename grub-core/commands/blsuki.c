@@ -1547,11 +1547,30 @@ set_bli_loader_entries (enum blsuki_cmd_type cmd_type)
 	  if (prev_entries_size != 0 && prev_entries)
 	    {
 	      do {
+		grub_size_t prev_entry_size;
+
 		tmp16 = prev_entries;
 		len16 = 0;
 		while (*tmp16++ != '\0')
 		    len16++;
-		prev_entry = grub_malloc (len16 + 1);
+
+		if (grub_mul (len16, GRUB_MAX_UTF8_PER_UTF16, &prev_entry_size) ||
+		    grub_add (prev_entry_size, 1, &prev_entry_size))
+		  {
+		    grub_free (prev_entries_start);
+		    grub_free (efi_entries);
+		    return grub_error (GRUB_ERR_OUT_OF_RANGE,
+				       "LoaderEntries entry is too large");
+		  }
+
+		prev_entry = grub_malloc (prev_entry_size);
+		if (prev_entry == NULL)
+		  {
+		    grub_free (prev_entries_start);
+		    grub_free (efi_entries);
+		    return grub_errno;
+		  }
+
 		*grub_utf16_to_utf8 ((grub_uint8_t*) prev_entry, prev_entries, len16) = '\0';
 		rc = filevercmp (prev_entry, entry->filename);
 		if (rc == 0)
