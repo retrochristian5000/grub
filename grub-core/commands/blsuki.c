@@ -1463,7 +1463,7 @@ set_bli_loader_entries (enum blsuki_cmd_type cmd_type)
   grub_size_t size = 0, remaining_size, len, written, prev_entries_size = 0, len16;
   grub_efi_char16_t *prev_entries_start = NULL;
   grub_size_t prev_entries_start_size = 0;
-  grub_efi_char16_t *efi_entries = NULL, *prev_entries = NULL, *p = NULL, *tmp16;
+  grub_efi_char16_t *efi_entries = NULL, *prev_entries = NULL, *p = NULL;
   char *boot_counting_idx, *prev_entry;
   const char* env = NULL;
   grub_efi_status_t status;
@@ -1548,11 +1548,29 @@ set_bli_loader_entries (enum blsuki_cmd_type cmd_type)
 	    {
 	      do {
 		grub_size_t prev_entry_size;
+		grub_size_t prev_entries_size16 = prev_entries_size / sizeof (*prev_entries);
 
-		tmp16 = prev_entries;
 		len16 = 0;
-		while (*tmp16++ != '\0')
+		/*
+		 * LoaderEntries comes from EFI variable storage, so it is only
+		 * trusted up to prev_entries_size16 UTF-16 code units. Bound
+		 * the scan in case a malformed variable is missing a
+		 * terminator.
+		 */
+		while (len16 < prev_entries_size16 && prev_entries[len16] != '\0')
 		    len16++;
+
+		/*
+		 * If we reached the end of the buffer without finding a null
+		 * terminator, the variable is malformed and we should bail
+		 * instead of risking an out-of-bounds read.
+		 */
+		if (len16 == prev_entries_size16)
+		  {
+		    grub_free (prev_entries_start);
+		    grub_free (efi_entries);
+		    return grub_error (GRUB_ERR_BAD_ARGUMENT, "malformed LoaderEntries variable");
+		  }
 
 		if (grub_mul (len16, GRUB_MAX_UTF8_PER_UTF16, &prev_entry_size) ||
 		    grub_add (prev_entry_size, 1, &prev_entry_size))

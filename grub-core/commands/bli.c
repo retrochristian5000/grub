@@ -28,6 +28,7 @@
 #include <grub/misc.h>
 #include <grub/mm.h>
 #include <grub/partition.h>
+#include <grub/safemath.h>
 #include <grub/tpm.h>
 #include <grub/types.h>
 
@@ -181,19 +182,35 @@ static char*
 get_efivar (const char* efivar)
 {
   grub_efi_status_t status;
-  grub_size_t size;
+  grub_size_t size, size16;
   grub_efi_char16_t *val_efi = NULL;
   char *val = NULL;
+
   status = grub_efi_get_variable (efivar,
 				  &bli_vendor_guid,
 				  &size,
 				  (void**) &val_efi);
-  if (status == GRUB_EFI_SUCCESS && size != 0)
+
+  size16 = size / sizeof (*val_efi);
+  if (status == GRUB_EFI_SUCCESS && size16 > 0)
     {
-      val = grub_malloc (size * sizeof (char));
-      grub_utf16_to_utf8 ((grub_uint8_t*) val,
-			  (grub_uint16_t*) val_efi, size);
+      grub_size_t size_utf8;
+
+      if (grub_mul (size16, GRUB_MAX_UTF8_PER_UTF16, &size_utf8) ||
+	  grub_add (size_utf8, 1, &size_utf8))
+	{
+	  grub_error (GRUB_ERR_OUT_OF_RANGE, "size overflow when converting EFI variable %s to UTF-8", efivar);
+	  goto finish;
+	}
+      val = grub_malloc (size_utf8);
+      if (val == NULL)
+	goto finish;
+      *grub_utf16_to_utf8 ((grub_uint8_t*) val,
+			  (grub_uint16_t*) val_efi, size16) = '\0';
     }
+
+finish:
+  grub_free (val_efi);
   return val;
 }
 

@@ -22,6 +22,7 @@
 #include <grub/extcmd.h>
 #include <grub/fs.h>
 #include <grub/env.h>
+#include <grub/safemath.h>
 #include <grub/lib/envblk.h>
 #include <grub/efi/api.h>
 #include <grub/efi/efi.h>
@@ -196,9 +197,13 @@ grub_cmd_bls_bumpcounter (grub_extcmd_context_t ctxt __attribute__ ((unused)),
     {
       grub_free(file_info);
       /* When we bump the counter, it might happen that we increase the filename
-         length. Add the space for 2 more characters. (i.e. adding the boot done
-         part "-1") */
-      size += 2;
+         length. Add the space for 2 more characters (4 bytes). (i.e. adding the
+         boot done part "-1") */
+      if (grub_add (size, 4, &size))
+	{
+	  grub_error (GRUB_ERR_OUT_OF_RANGE, N_("size overflow"));
+	  goto finish;
+	}
       file_info = grub_malloc (size);
       if (!file_info)
 	{
@@ -222,7 +227,8 @@ grub_cmd_bls_bumpcounter (grub_extcmd_context_t ctxt __attribute__ ((unused)),
 
   grub_dprintf ("bls_bumpcounter", "renaming entry to %s\n", new_path);
   grub_utf8_to_utf16 (file_info->FileName,
-		      size - offsetof (grub_efi_file_info_t, FileName),
+		      (size - offsetof (grub_efi_file_info_t, FileName))
+              / sizeof (grub_efi_char16_t),
 		      (grub_uint8_t*) new_path, grub_strlen (new_path), NULL);
 
   err = handle->SetInfo (handle, &grub_efi_file_info_guid, size, file_info);
