@@ -1013,6 +1013,7 @@ bls_create_entry (grub_blsuki_entry_t *entry)
   char *initrd_cmd = NULL;
   char *dt_cmd = NULL;
   char *id = entry->filename;
+  char *id_dup = NULL;
   grub_size_t id_len;
   char *hotkey = NULL;
   char *users = NULL;
@@ -1033,6 +1034,52 @@ bls_create_entry (grub_blsuki_entry_t *entry)
   id_len = grub_strlen (id);
   if (id_len >= BLS_EXT_LEN && grub_strcmp (id + id_len - BLS_EXT_LEN, ".conf") == 0)
     id[id_len - BLS_EXT_LEN] = '\0';
+  id_len = grub_strlen (id);
+  /*
+   * The menuentry ID should have the boot assessemnt counters removed, to
+   * canonicalize that default entry can be correctly matched.
+   */
+  char *tries = grub_strrchr (id, '+');
+  if (tries != NULL)
+    {
+      char *n;
+      const char *n_end = NULL;
+      char *done = grub_strrchr (tries, '-');
+      if (done != NULL)
+	n = grub_strndup (tries + 1, done - tries - 1);
+      else
+	n = grub_strdup (tries + 1);
+      if (n == NULL)
+	goto finish;
+      grub_error_push ();
+      grub_strtol (n, &n_end, 10);
+      switch (grub_errno)
+	{
+	case GRUB_ERR_NONE:
+	  grub_error_pop ();
+	  if (n_end && n_end != n && *n_end == '\0')
+	    {
+	      id_dup = grub_strdup (id);
+	      if (id_dup == NULL)
+		{
+		  grub_free (n);
+		  goto finish;
+		}
+	      grub_strrchr (id_dup, '+')[0] = '\0';
+	    }
+	  break;
+	default:
+	  grub_error_pop ();
+	  break;
+	}
+      grub_free (n);
+    }
+
+  if (id_dup != NULL)
+    {
+      id = id_dup;
+      id_len = grub_strlen (id);
+    }
 
   title = blsuki_get_val (entry, "title", NULL);
   version = blsuki_get_val (entry, "version", NULL);
@@ -1094,6 +1141,7 @@ bls_create_entry (grub_blsuki_entry_t *entry)
   grub_free (args);
   grub_free (argv);
   grub_free (src);
+  grub_free (id_dup);
 }
 
 #ifdef GRUB_MACHINE_EFI

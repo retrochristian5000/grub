@@ -103,8 +103,9 @@ grub_cmd_bls_bumpcounter (grub_extcmd_context_t ctxt __attribute__ ((unused)),
   grub_efi_status_t err;
   char *entry, *new_path = NULL, *old_path;
   const char *blsdir;
-  grub_efi_uint64_t size;
+  grub_efi_uint64_t size, size_info;
   grub_efi_char16_t *old_path16;
+  grub_efi_uint64_t len16;
 
   if (argc != 1) {
     grub_dprintf ("bls_bumpcounter", "only one argument should be passed\n");
@@ -165,7 +166,7 @@ grub_cmd_bls_bumpcounter (grub_extcmd_context_t ctxt __attribute__ ((unused)),
       blsdir = GRUB_BLS_CONFIG_PATH;
     }
 
-  old_path = grub_xasprintf ("%s%s", blsdir, entry);
+  old_path = grub_xasprintf ("%s%s.conf", blsdir, entry);
   grub_utf8_to_utf16_alloc (old_path, &old_path16, NULL);
 
   err = root->Open (root, &handle, old_path16,
@@ -184,14 +185,15 @@ grub_cmd_bls_bumpcounter (grub_extcmd_context_t ctxt __attribute__ ((unused)),
      most cases, and, if it fails, allocate a new one with the exact size
      returned from GetInfo.
      Reference: systemd:src/boot/efi/util.c =*/
-  size = offsetof (grub_efi_file_info_t, FileName)
+  size_info = offsetof (grub_efi_file_info_t, FileName)
 		   + 256U * sizeof (grub_efi_char16_t);
-  file_info = grub_malloc (size);
+  file_info = grub_malloc (size_info);
   if (!file_info)
     {
       grub_error (GRUB_ERR_OUT_OF_MEMORY, N_("out of memory"));
       goto finish;
     }
+  size = size_info - 4; /* reserve space for 2 more characters (4 bytes) for the boot done part "-1" */
   err = handle->GetInfo (handle, &grub_efi_file_info_guid, &size, file_info);
   if (err == GRUB_EFI_BUFFER_TOO_SMALL)
     {
@@ -199,12 +201,12 @@ grub_cmd_bls_bumpcounter (grub_extcmd_context_t ctxt __attribute__ ((unused)),
       /* When we bump the counter, it might happen that we increase the filename
          length. Add the space for 2 more characters (4 bytes). (i.e. adding the
          boot done part "-1") */
-      if (grub_add (size, 4, &size))
+      if (grub_add (size, 4, &size_info))
 	{
 	  grub_error (GRUB_ERR_OUT_OF_RANGE, N_("size overflow"));
 	  goto finish;
 	}
-      file_info = grub_malloc (size);
+      file_info = grub_malloc (size_info);
       if (!file_info)
 	{
 	  grub_error (GRUB_ERR_OUT_OF_MEMORY, N_("out of memory"));
@@ -226,12 +228,24 @@ grub_cmd_bls_bumpcounter (grub_extcmd_context_t ctxt __attribute__ ((unused)),
     goto finish;
 
   grub_dprintf ("bls_bumpcounter", "renaming entry to %s\n", new_path);
-  grub_utf8_to_utf16 (file_info->FileName,
-		      (size - offsetof (grub_efi_file_info_t, FileName))
+  len16 = grub_utf8_to_utf16 (file_info->FileName,
+		      (size_info - offsetof (grub_efi_file_info_t, FileName))
               / sizeof (grub_efi_char16_t),
 		      (grub_uint8_t*) new_path, grub_strlen (new_path), NULL);
 
-  err = handle->SetInfo (handle, &grub_efi_file_info_guid, size, file_info);
+  /*
+   * Check if the new filename fits in the allocated file_info buffer. If not,
+   * it means that the entry is too long to be renamed with the bumped counter,
+   * and we should bail instead of risking an out-of-bounds write.
+   */
+  if (len16 >= (size_info - offsetof (grub_efi_file_info_t, FileName)) /
+		   sizeof (grub_efi_char16_t))
+    {
+      grub_dprintf ("bls_bumpcounter", "new filename is too long\n");
+      goto finish;
+    }
+  file_info->FileName[len16++] = '\0';
+  err = handle->SetInfo (handle, &grub_efi_file_info_guid, size_info, file_info);
 
   if (err != GRUB_EFI_SUCCESS)
     {
