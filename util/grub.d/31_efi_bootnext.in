@@ -34,6 +34,39 @@ if [ "${GRUB_DISABLE_BOOTNEXT}" = "true" ]; then
     exit 0
 fi
 
+# Two discovery modes share the GRUB_BOOTNEXT_* knobs:
+#
+#   - Config-time (default, below): enumerate the firmware boot options here
+#     with efibootmgr and bake one static menu entry per option into grub.cfg.
+#     Filters non-OS and self entries using the local install (os-prober and
+#     the SELF_* detection), so it needs a populated NVRAM at generation time.
+#
+#   - Runtime (GRUB_BOOTNEXT_DISCOVER_AT_BOOT=true): emit a single
+#     efibootmenu command that discovers the boot options at boot time
+#     instead.  Works where grub.cfg is regenerated on a different host or
+#     the grub.d scripts are not run, as long as grub.cfg invokes the
+#     command.  It identifies its own entry via BootCurrent rather than
+#     the install-based SELF_* detection, so it cannot exclude self across
+#     a chainload.
+if [ "${GRUB_BOOTNEXT_DISCOVER_AT_BOOT}" = "true" ]; then
+    FLAGS=
+    if [ "${GRUB_BOOTNEXT_OMIT_INACTIVE}" = "true" ]; then
+        FLAGS="${FLAGS} --omit-inactive"
+    fi
+    if [ "${GRUB_SAVEDEFAULT}" = "true" ]; then
+        FLAGS="${FLAGS} --savedefault"
+    fi
+    if [ "${GRUB_BOOTNEXT_CATEGORY_BOOT_ONLY}" = "true" ]; then
+        FLAGS="${FLAGS} --category-boot-only"
+    fi
+    cat << EOF
+if [ "\$grub_platform" = "efi" ]; then
+  efibootmenu${FLAGS}
+fi
+EOF
+    exit 0
+fi
+
 # Bail out early and silently on systems other than Linux with the EFI
 # subsystem present.  /sys/firmware/efi is the Linux EFI sysfs interface;
 # its absence means either a non-EFI boot or a non-Linux system whose

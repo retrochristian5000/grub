@@ -859,6 +859,7 @@ module = {
 module = {
   name = efibootnext;
   efi = commands/efi/efibootnext.c;
+  efi = commands/efi/efibootnext_menu.c;
   enable = efi;
 };
 

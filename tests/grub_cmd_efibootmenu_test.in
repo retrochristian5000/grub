@@ -1,0 +1,71 @@
+#! @BUILD_SHEBANG@
+set -ex
+
+# Run GRUB script in a Qemu instance
+# Copyright (C) 2026  Free Software Foundation, Inc.
+#
+# GRUB is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# GRUB is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with GRUB.  If not, see <http://www.gnu.org/licenses/>.
+
+. "@builddir@/grub-core/modinfo.sh"
+
+# PLATFORM: efibootnext is built for EFI platforms only (enable = efi).
+case "${grub_modinfo_target_cpu}-${grub_modinfo_platform}" in
+    *-efi) ;;
+    *) exit 77 ;;
+esac
+
+# This test asserts only the deterministic, firmware-independent
+# behaviour of the 'efibootmenu' command: its option parsing and that
+# it runs to completion.  Which Boot#### entries the firmware defines
+# (and therefore which menu entries get created) varies by firmware, so
+# that is not asserted here.
+out=$(@builddir@/grub-shell <<'EOF'
+insmod efibootnext
+
+# The command accepts its documented flags and succeeds.
+if efibootmenu; then echo "A1 ok"; else echo "A1 bad"; fi
+if efibootmenu --omit-inactive --savedefault --category-boot-only; then
+    echo "A2 ok"
+else
+    echo "A2 bad"
+fi
+
+# An unknown option is rejected by argument parsing.
+if efibootmenu --no-such-flag; then echo "A3 bad"; else echo "A3 ok"; fi
+
+echo DONE
+EOF
+)
+
+# Fail loudly if the guest did not run to completion.
+if ! echo "$out" | grep -q '^DONE$'; then
+    echo "error: efibootmenu test did not complete; output:" >&2
+    echo "$out" >&2
+    exit 1
+fi
+
+# Any "<tag> bad" means a case behaved the opposite of what was expected.
+if echo "$out" | grep -q ' bad$'; then
+    echo "error: unexpected efibootmenu result; output:" >&2
+    echo "$out" >&2
+    exit 1
+fi
+
+for expect in 'A1 ok' 'A2 ok' 'A3 ok'; do
+    if ! echo "$out" | grep -qF "$expect"; then
+	echo "error: missing expected output: $expect" >&2
+	echo "$out" >&2
+	exit 1
+    fi
+done
