@@ -1807,6 +1807,8 @@ module = {
   x86_64_xen = lib/x86_64/xen/relocator.S;
   xen = lib/i386/relocator_common_c.c;
   x86_64_efi = lib/x86_64/efi/relocator.c;
+  arm_efi = lib/arm/relocator.c;
+  arm_efi = lib/arm/relocator_asm.S;
 
   extra_dist = lib/i386/relocator_common.S;
   extra_dist = kern/powerpc/cache_flush.S;
@@ -1816,6 +1818,7 @@ module = {
   enable = x86;
   enable = i386_xen_pvh;
   enable = xen;
+  enable = arm_efi;
 };
 
 module = {
@@ -1917,6 +1920,7 @@ module = {
   enable = x86;
   enable = i386_xen_pvh;
   enable = mips;
+  enable = arm_efi;
 };
 
 module = {
@@ -2045,6 +2049,8 @@ module = {
   efi = mmap/efi/mmap.c;
 
   mips = mmap/mips/uppermem.c;
+
+  arm_efi = mmap/arm/uppermem.c;
 
   enable = x86;
   enable = i386_xen_pvh;
