@@ -175,6 +175,7 @@ static grub_err_t
 grub_multiboot_boot (void)
 {
   grub_err_t err;
+  grub_uint32_t mbi_value;
 
 #ifdef GRUB_USE_MULTIBOOT2
   struct grub_relocator32_state state = MULTIBOOT2_INITIAL_STATE;
@@ -183,11 +184,12 @@ grub_multiboot_boot (void)
 #endif
   state.MULTIBOOT_ENTRY_REGISTER = GRUB_MULTIBOOT (payload_eip);
 
-  err = GRUB_MULTIBOOT (make_mbi) (&state.MULTIBOOT_MBI_REGISTER);
+  err = GRUB_MULTIBOOT (make_mbi) (&mbi_value);
 
   if (err)
     return err;
 
+  state.MULTIBOOT_MBI_REGISTER = mbi_value;
   if (grub_efi_is_finished)
     normal_boot (GRUB_MULTIBOOT (relocator), state);
   else
