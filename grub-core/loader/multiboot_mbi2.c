@@ -721,12 +721,9 @@ grub_multiboot2_make_mbi (grub_uint32_t *target)
     return err;
 
   ptrorig = get_virtual_current_address (ch);
-#if defined (__i386__) || defined (__x86_64__)
   *target = get_physical_target_address (ch);
-#elif defined (__mips)
-  *target = get_physical_target_address (ch) | 0x80000000;
-#else
-#error Please complete this
+#ifdef __mips
+  *target |= 0x80000000;
 #endif
 
   mbistart = ptrorig;
