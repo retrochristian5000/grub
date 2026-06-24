@@ -1811,6 +1811,10 @@ module = {
   arm_efi = lib/arm/relocator_asm.S;
   arm64_efi = lib/arm64/relocator.c;
   arm64_efi = lib/arm64/relocator_asm.S;
+  riscv64_efi = lib/riscv/relocator.c;
+  riscv64_efi = lib/riscv/relocator_asm.S;
+  riscv32_efi = lib/riscv/relocator.c;
+  riscv32_efi = lib/riscv/relocator_asm.S;
 
   extra_dist = lib/i386/relocator_common.S;
   extra_dist = kern/powerpc/cache_flush.S;
@@ -1822,6 +1826,8 @@ module = {
   enable = xen;
   enable = arm_efi;
   enable = arm64_efi;
+  enable = riscv64_efi;
+  enable = riscv32_efi;
 };
 
 module = {
@@ -1925,6 +1931,8 @@ module = {
   enable = mips;
   enable = arm_efi;
   enable = arm64_efi;
+  enable = riscv64_efi;
+  enable = riscv32_efi;
 };
 
 module = {
@@ -2057,6 +2065,10 @@ module = {
   arm_efi = mmap/arm/uppermem.c;
 
   arm64_efi = mmap/arm/uppermem.c;
+
+  riscv64_efi = mmap/riscv/uppermem.c;
+
+  riscv32_efi = mmap/riscv/uppermem.c;
 
   enable = x86;
   enable = i386_xen_pvh;
