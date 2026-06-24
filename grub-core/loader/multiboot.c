@@ -212,22 +212,31 @@ grub_multiboot_unload (void)
 
 static grub_uint64_t highest_load;
 
-#define MULTIBOOT_LOAD_ELF64
-#include "multiboot_elfxx.c"
-#undef MULTIBOOT_LOAD_ELF64
+#ifdef MULTIBOOT_ELF64_MACHINE
+# define MULTIBOOT_LOAD_ELF64
+# include "multiboot_elfxx.c"
+# undef MULTIBOOT_LOAD_ELF64
+#endif
 
-#define MULTIBOOT_LOAD_ELF32
-#include "multiboot_elfxx.c"
-#undef MULTIBOOT_LOAD_ELF32
+#ifdef MULTIBOOT_ELF32_MACHINE
+# define MULTIBOOT_LOAD_ELF32
+# include "multiboot_elfxx.c"
+# undef MULTIBOOT_LOAD_ELF32
+#endif
 
 /* Load ELF32 or ELF64.  */
 grub_err_t
 GRUB_MULTIBOOT (load_elf) (mbi_load_data_t *mld)
 {
+#ifdef MULTIBOOT_ELF32_MACHINE
   if (grub_multiboot_is_elf32 (mld->buffer))
     return grub_multiboot_load_elf32 (mld);
-  else if (grub_multiboot_is_elf64 (mld->buffer))
+#endif
+
+#ifdef MULTIBOOT_ELF64_MACHINE
+  if (grub_multiboot_is_elf64 (mld->buffer))
     return grub_multiboot_load_elf64 (mld);
+#endif
 
   return grub_error (GRUB_ERR_UNKNOWN_OS, N_("invalid arch-dependent ELF magic"));
 }
