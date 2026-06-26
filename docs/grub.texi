@@ -4154,6 +4154,7 @@ Modules can be loaded via the @command{insmod} (@pxref{insmod}) command.
 * btrfs_module::
 * bufio_module::
 * cacheinfo_module::
+* calc_module::
 * cat_module::
 * cbfs_module::
 * cbls_module::
@@ -4616,6 +4617,12 @@ file reads performed in other modules.
 This module provides support for the command @command{cacheinfo} which provides
 statistics on disk cache accesses. This module is only built if
 @code{DISK_CACHE_STATS} is enabled.
+
+@node calc_module
+@section calc
+This module provides support for the @command{calc} command to perform simple
+mathematical calculations and bitwise operations.  @xref{calc} for more
+information.
 
 @node cat_module
 @section cat
@@ -6804,6 +6811,7 @@ you forget a command, you can run the command @command{help}
 * blscfg::                      Load Boot Loader Specification menu entries
 * boot::                        Start up your operating system
 * bootnext::                    Set EFI BootNext variable
+* calc::                        Perform mathematical and bitwise operations
 * cat::                         Show the contents of a file
 * clear::                       Clear the screen
 * cmosclean::                   Clear bit in CMOS
@@ -7223,6 +7231,106 @@ Set the UEFI @samp{BootNext} variable to @samp{Boot}@var{XXXX}, where
 prefix).  The firmware will boot that entry exactly once on the next boot,
 without altering @samp{BootOrder}.  Use the @command{reboot} command
 afterwards to trigger the boot immediately.
+@end deffn
+
+
+@node calc                    
+@subsection calc
+
+@deffn Command calc [@option{--set} var] [number_system] number [expression [... [expression]]]
+Perform simple mathematical calculations and bitwise operations. If option
+@option{--set} is given, store result in variable @var{var}. Unless
+@var{number_system} is specified, the result will be represented using the
+decimal number system.
+
+The parser will interpret negative numeric values as command line options
+unless a double hypehn ("---") is provided after the last option. For example:
+
+@example
+grub> @kbd{calc --hex -42 pow 4}
+error: ../../grub-core/lib/arg.c:grub_arg_parse:291:unknown argument `-4'.
+grub> @kbd{calc --hex -- -42 pow 4}
+0x2f7b10
+grub> @kbd{calc -- -42 pow 4}
+3111696
+@end example
+
+@var{number_system} may be one of the following options:
+@itemize @bullet
+@item
+@option{--binary} Represent result using binary number system
+@item
+@option{--octal} Represent result using octal number system
+@item
+@option{--decimal} Represent result using decimal number system
+@item
+@option{--hex} Represent result using dhexadecimal number system
+@end itemize
+
+@var{expression} may be one of the following:
+@itemize @bullet
+@item
+@var{add} @var{NUMBER} - addition
+@item
+@var{sub} @var{NUMBER} - subtraction
+@item
+@var{div} @var{NUMBER} - integer division
+@item
+@var{mod} @var{NUMBER} - modulo operation
+@item
+@var{mul} @var{NUMBER} - multiplication
+@item
+@var{pow} @var{NUMBER} - exponentiation
+@item
+@var{and} @var{NUMBER} - bitwise AND operation
+@item
+@var{or} @var{NUMBER} - bitwise inclusive OR operation
+@item
+@var{xor} @var{NUMBER} - bitwise exclusive OR operation
+@item
+@var{not} - bitwise NOT operation
+@item
+@var{neg} - same as @var{not}
+@item
+@var{lsh} @var{NUMBER} - bitwise left shift operation
+@item
+@var{rsh} @var{NUMBER} - bitwise right shift operation
+@item
+@var{lshift} @var{NUMBER} - same as @var{lsh}
+@item
+@var{rshift} @var{NUMBER} - same as @var{rsh}
+@end itemize
+
+Example expressions:
+@example
+grub> @kbd{calc 1 add 3}
+4
+grub> @kbd{calc 7 div 2}
+3
+grub> @kbd{calc 5 mod 2}
+1
+grub> @kbd{calc -- 14 div -3}
+-4
+grub> @kbd{calc 907 add 980 mod 1151}
+736
+grub> @kbd{calc --set calc_result --hex 2 add 1 mul 4}
+grub> @kbd{echo $@b{@{}calc_result@b{@}}}
+0xc
+grub>
+@end example
+
+Examples of number conversions:
+@example
+grub> @kbd{calc --octal 0b1010101}
+0125
+grub> @kbd{calc --decimal 0125}
+85
+grub> @kbd{calc --hex 85}
+0x55
+grub> @kbd{calc --binary 0x55}
+0b1010101
+grub>
+@end example
 @end deffn
 
 
