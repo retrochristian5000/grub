@@ -1,0 +1,46 @@
+#! @BUILD_SHEBANG@
+set -ex
+
+# Run GRUB script in a Qemu instance
+# Copyright (C) 2026  Free Software Foundation, Inc.
+#
+# GRUB is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# GRUB is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with GRUB.  If not, see <http://www.gnu.org/licenses/>.
+
+cmd='calc -s result 907 add 980 mod 1151; echo $result'
+v=`echo "$cmd" | @builddir@/grub-shell`
+if test "$v" != 736; then echo "error: $cmd" >&2; exit 1; fi
+
+cmd='calc -p 4 -H 123; echo $result'
+v=`echo "$cmd" | @builddir@/grub-shell`
+if test "$v" != 0x007b; then echo "error: $cmd" >&2; exit 1; fi
+
+cmd='calc -B 0x007b; echo $result'
+v=`echo "$cmd" | @builddir@/grub-shell`
+if test "$v" != 0b1111011; then echo "error: $cmd" >&2; exit 1; fi
+
+cmd='calc -O 0b1111011; echo $result'
+v=`echo "$cmd" | @builddir@/grub-shell`
+if test "$v" != 0173; then echo "error: $cmd" >&2; exit 1; fi
+
+cmd='calc -D 0173; echo $result'
+v=`echo "$cmd" | @builddir@/grub-shell`
+if test "$v" != 123; then echo "error: $cmd" >&2; exit 1; fi
+
+cmd='calc -s result 0 pow 1; echo $result'
+v=`echo "$cmd" | @builddir@/grub-shell`
+if test "$v" != 0; then echo "error: $cmd" >&2; exit 1; fi
+
+cmd='calc -s result 12 pow 5; echo $result'
+v=`echo "$cmd" | @builddir@/grub-shell`
+if test "$v" != 248832; then echo "error: $cmd" >&2; exit 1; fi
