@@ -53,6 +53,12 @@ struct grub_net_link_layer_entry {
 
 #define LINK_LAYER_CACHE_SIZE 256
 
+static const struct grub_arg_option options_deladdr[] =
+{
+  { "all", 'a', 0, N_("delete all addresses."), 0, 0 },
+  { 0, 0, 0, 0, 0, 0 }
+};
+
 static const struct grub_arg_option options_lsaddr[] =
 {
   { "set", 's', GRUB_ARG_OPTION_REPEATABLE,
@@ -739,10 +745,33 @@ grub_net_route_address (grub_net_network_level_address_t addr,
 }
 
 static grub_err_t
-grub_cmd_deladdr (struct grub_command *cmd __attribute__ ((unused)),
-		  int argc, char **args)
+grub_cmd_deladdr (grub_extcmd_context_t ctxt, int argc, char **args)
 {
   struct grub_net_network_level_interface *inter;
+  struct grub_net_network_level_interface *next_inter;
+
+  /* delete all addresses if requested */
+  if (ctxt->state[0].set != 0)
+    {
+      if (argc != 0)
+        return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("cannot specify argument with --all"));
+      inter = grub_net_network_level_interfaces;
+      while ( inter )
+        {
+          next_inter = inter->next;
+          if (inter->flags & GRUB_NET_INTERFACE_PERMANENT)
+            {
+              grub_printf (N_("unable to delete address %s\n"), inter->name);
+              inter = next_inter;
+              continue;
+            }
+          grub_net_network_level_interface_unregister (inter);
+          grub_free (inter->name);
+          grub_free (inter);
+          inter = next_inter;
+        }
+      return GRUB_ERR_NONE;
+    }
 
   if (argc != 1)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("one argument expected"));
@@ -2265,9 +2294,10 @@ grub_net_search_config_file (char *config, grub_size_t config_buf_len)
 
 static struct grub_preboot *fini_hnd;
 
-static grub_command_t cmd_addaddr, cmd_deladdr, cmd_addroute, cmd_delroute;
+static grub_command_t cmd_addaddr, cmd_addroute, cmd_delroute;
 static grub_command_t cmd_setvlan, cmd_lsroutes;
 static grub_command_t cmd_slaac;
+static grub_extcmd_t cmd_deladdr;
 static grub_extcmd_t cmd_lsaddr, cmd_lscards;
 
 GRUB_MOD_INIT(net)
@@ -2295,9 +2325,10 @@ GRUB_MOD_INIT(net)
 				     N_("[CARD [HWADDRESS]]"),
 				     N_("Perform an IPV6 autoconfiguration"));
 
-  cmd_deladdr = grub_register_command ("net_del_addr", grub_cmd_deladdr,
-				       N_("SHORTNAME"),
-				       N_("Delete a network address."));
+  cmd_deladdr = grub_register_extcmd ("net_del_addr", grub_cmd_deladdr, 0,
+				       N_("[--all|SHORTNAME]"),
+				       N_("Delete a network address."),
+                                       options_deladdr);
   cmd_addroute = grub_register_command ("net_add_route", grub_cmd_addroute,
 					/* TRANSLATORS: "gw" is a keyword.  */
 					N_("SHORTNAME NET [INTERFACE| gw GATEWAY]"),
@@ -2338,7 +2369,7 @@ GRUB_MOD_FINI(net)
   grub_bootp_fini ();
   grub_dns_fini ();
   grub_unregister_command (cmd_addaddr);
-  grub_unregister_command (cmd_deladdr);
+  grub_unregister_extcmd (cmd_deladdr);
   grub_unregister_command (cmd_addroute);
   grub_unregister_command (cmd_delroute);
   grub_unregister_command (cmd_setvlan);
