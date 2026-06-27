@@ -684,37 +684,49 @@ grub_cmd_nslookup (struct grub_command *cmd __attribute__ ((unused)),
 }
 
 static grub_err_t
+grub_cmd_list_dns_str (char *str, grub_size_t size,
+		       struct grub_net_network_level_address *dns_server)
+{
+  char buf[GRUB_NET_MAX_STR_ADDR_LEN];
+  const char *strtype = "";
+
+  switch (dns_server->option)
+    {
+    case DNS_OPTION_IPV4:
+      strtype = _("only ipv4");
+      break;
+
+    case DNS_OPTION_IPV6:
+      strtype = _("only ipv6");
+      break;
+
+    case DNS_OPTION_PREFER_IPV4:
+      strtype = _("prefer ipv4");
+      break;
+
+    case DNS_OPTION_PREFER_IPV6:
+      strtype = _("prefer ipv6");
+      break;
+    }
+
+  grub_net_addr_to_str (dns_server, buf);
+  grub_snprintf (str, size, "%s (%s)", buf, strtype);
+
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
 grub_cmd_list_dns (struct grub_command *cmd __attribute__ ((unused)),
 		   int argc __attribute__ ((unused)),
 		   char **args __attribute__ ((unused)))
 {
   grub_size_t i;
-  const char *strtype = "";
+  char buf[GRUB_NET_MAX_STR_ADDR_LEN+24];
 
   for (i = 0; i < dns_nservers; i++)
     {
-      switch (dns_servers[i].option)
-        {
-        case DNS_OPTION_IPV4:
-          strtype = _("only ipv4");
-          break;
-
-        case DNS_OPTION_IPV6:
-          strtype = _("only ipv6");
-          break;
-
-        case DNS_OPTION_PREFER_IPV4:
-          strtype = _("prefer ipv4");
-          break;
-
-        case DNS_OPTION_PREFER_IPV6:
-          strtype = _("prefer ipv6");
-          break;
-        }
-
-      char buf[GRUB_NET_MAX_STR_ADDR_LEN];
-      grub_net_addr_to_str (&dns_servers[i], buf);
-      grub_printf ("%s (%s)\n", buf, strtype);
+      grub_cmd_list_dns_str(buf, sizeof(buf), &dns_servers[i]);
+      grub_printf ("%s\n", buf);
     }
   return GRUB_ERR_NONE;
 }
