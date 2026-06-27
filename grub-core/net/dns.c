@@ -53,6 +53,14 @@ static const struct grub_arg_option options_del[] =
   { 0, 0, 0, 0, 0, 0 }
 };
 
+static const struct grub_arg_option options_ls[] =
+{
+  { "set", 's', GRUB_ARG_OPTION_REPEATABLE,
+    N_("Set DNS servers NUMBER in VARNAME."),
+    N_("[NUMBER:]VARNAME"), ARG_TYPE_STRING },
+  { 0, 0, 0, 0, 0, 0 }
+};
+
 grub_err_t
 grub_net_add_dns_server (const struct grub_net_network_level_address *s)
 {
@@ -716,12 +724,65 @@ grub_cmd_list_dns_str (char *str, grub_size_t size,
 }
 
 static grub_err_t
-grub_cmd_list_dns (struct grub_command *cmd __attribute__ ((unused)),
+grub_cmd_list_dns_setvars (char **varnames)
+{
+  int i;
+  char *p;
+  grub_err_t err;
+  unsigned long j;
+  const char * q;
+  char buf[GRUB_NET_MAX_STR_ADDR_LEN+24];
+
+  for (i = 0; varnames && varnames[i]; i++)
+    {
+      err = GRUB_ERR_NONE;
+      p = grub_strchr (varnames[i], ':');
+      if (! p)
+        {
+          /* varname w/o index defaults to first server */
+          if (dns_nservers == 0)
+            grub_env_unset (varnames[i]);
+          else
+            {
+              grub_cmd_list_dns_str(buf, sizeof(buf), &dns_servers[0]);
+              err = grub_env_set (varnames[i], buf);
+            }
+        }
+      else
+        {
+          j = grub_strtoul (varnames[i], &q, 10);
+          if (q != p)
+            return grub_error (GRUB_ERR_BAD_ARGUMENT,
+                               "invalid variable name format %s", varnames[i]);
+          if ((unsigned long)dns_nservers <= j)
+            grub_env_unset (p + 1);
+          else
+            {
+              grub_cmd_list_dns_str(buf, sizeof(buf), &dns_servers[j]);
+              err = grub_env_set (p + 1, buf);
+            }
+        }
+      if (err != GRUB_ERR_NONE)
+        return err;
+    }
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
+grub_cmd_list_dns (grub_extcmd_context_t ctxt,
 		   int argc __attribute__ ((unused)),
 		   char **args __attribute__ ((unused)))
 {
   grub_size_t i;
   char buf[GRUB_NET_MAX_STR_ADDR_LEN+24];
+  grub_err_t err;
+
+  if (ctxt->state[0].set != 0)
+    {
+      err = grub_cmd_list_dns_setvars(ctxt->state[0].args);
+      if (err != GRUB_ERR_NONE)
+        return err;
+    }
 
   for (i = 0; i < dns_nservers; i++)
     {
@@ -789,8 +850,8 @@ grub_cmd_del_dns (grub_extcmd_context_t ctxt,
   return GRUB_ERR_NONE;
 }
 
-static grub_command_t cmd, cmd_add, cmd_list;
-static grub_extcmd_t cmd_del;
+static grub_command_t cmd, cmd_add;
+static grub_extcmd_t cmd_del, cmd_list;
 
 void
 grub_dns_init (void)
@@ -805,8 +866,10 @@ grub_dns_init (void)
 				   N_("[--all | DNSSERVER]"),
 				   N_("Remove a DNS server"),
                                    options_del);
-  cmd_list = grub_register_command ("net_ls_dns", grub_cmd_list_dns,
-				   NULL, N_("List DNS servers"));
+  cmd_list = grub_register_extcmd ("net_ls_dns", grub_cmd_list_dns, 0,
+				   N_("[--set=[NUMBER:]VARNAME]"),
+				   N_("List DNS servers"),
+                                   options_ls);
 }
 
 void
@@ -815,5 +878,5 @@ grub_dns_fini (void)
   grub_unregister_command (cmd);
   grub_unregister_command (cmd_add);
   grub_unregister_extcmd (cmd_del);
-  grub_unregister_command (cmd_list);
+  grub_unregister_extcmd (cmd_list);
 }
