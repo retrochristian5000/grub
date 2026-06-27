@@ -127,10 +127,21 @@ GRUB_MULTIBOOT (set_video_mode) (void)
 }
 
 #ifdef GRUB_MACHINE_EFI
-#ifdef __x86_64__
-#define grub_relocator_efi_boot		grub_relocator64_efi_boot
-#define grub_relocator_efi_state	grub_relocator64_efi_state
+# if GRUB_CPU_SIZEOF_VOID_P == 8
+#  define grub_relocator_efi_boot	grub_relocator64_efi_boot
+#  define grub_relocator_efi_state	grub_relocator64_efi_state
+# elif GRUB_CPU_SIZEOF_VOID_P == 4 && !defined(__i386__)
+#  define grub_relocator_efi_boot	grub_relocator32_efi_boot
+#  define grub_relocator_efi_state	grub_relocator32_efi_state
+# endif
 #endif
+
+#if GRUB_CPU_SIZEOF_VOID_P == 8 && !defined(__x86_64__)
+# define grub_relocator_boot	grub_relocator64_boot
+# define grub_relocator_state	grub_relocator64_state
+#else
+# define grub_relocator_boot	grub_relocator32_boot
+# define grub_relocator_state	grub_relocator32_state
 #endif
 
 #ifdef grub_relocator_efi_boot
@@ -159,15 +170,15 @@ efi_boot (struct grub_relocator *rel __attribute__ ((unused)),
 
 #if defined (__i386__) || defined (__x86_64__)
 static void
-normal_boot (struct grub_relocator *rel, struct grub_relocator32_state state)
+normal_boot (struct grub_relocator *rel, struct grub_relocator_state state)
 {
-  grub_relocator32_boot (rel, state, 0);
+  grub_relocator_boot (rel, state, 0);
 }
 #else
 static void
-normal_boot (struct grub_relocator *rel, struct grub_relocator32_state state)
+normal_boot (struct grub_relocator *rel, struct grub_relocator_state state)
 {
-  grub_relocator32_boot (rel, state);
+  grub_relocator_boot (rel, state);
 }
 #endif
 
@@ -178,9 +189,9 @@ grub_multiboot_boot (void)
   grub_uint32_t mbi_value;
 
 #ifdef GRUB_USE_MULTIBOOT2
-  struct grub_relocator32_state state = MULTIBOOT2_INITIAL_STATE;
+  struct grub_relocator_state state = MULTIBOOT2_INITIAL_STATE;
 #else
-  struct grub_relocator32_state state = MULTIBOOT_INITIAL_STATE;
+  struct grub_relocator_state state = MULTIBOOT_INITIAL_STATE;
 #endif
   state.MULTIBOOT_ENTRY_REGISTER = GRUB_MULTIBOOT (payload_eip);
 
