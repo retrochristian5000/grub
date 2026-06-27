@@ -58,6 +58,7 @@ static const struct grub_arg_option options_ls[] =
   { "set", 's', GRUB_ARG_OPTION_REPEATABLE,
     N_("Set DNS servers NUMBER in VARNAME."),
     N_("[NUMBER:]VARNAME"), ARG_TYPE_STRING },
+  { "quiet", 'q', 0, N_("Do not print output."), 0, 0 },
   { 0, 0, 0, 0, 0, 0 }
 };
 
@@ -784,11 +785,15 @@ grub_cmd_list_dns (grub_extcmd_context_t ctxt,
         return err;
     }
 
-  for (i = 0; i < dns_nservers; i++)
+  if (ctxt->state[1].set == 0)
     {
-      grub_cmd_list_dns_str(buf, sizeof(buf), &dns_servers[i]);
-      grub_printf ("%s\n", buf);
+      for (i = 0; i < dns_nservers; i++)
+        {
+          grub_cmd_list_dns_str(buf, sizeof(buf), &dns_servers[i]);
+          grub_printf ("%s\n", buf);
+        }
     }
+
   return GRUB_ERR_NONE;
 }
 
