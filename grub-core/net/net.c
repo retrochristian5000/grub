@@ -58,6 +58,7 @@ static const struct grub_arg_option options_lsaddr[] =
   { "set", 's', GRUB_ARG_OPTION_REPEATABLE,
     N_("Set address NUMBER in VARNAME."),
     N_("[NUMBER:]VARNAME"), ARG_TYPE_STRING },
+  { "quiet", 'q', 0, N_("Do not print output."), 0, 0 },
   { 0, 0, 0, 0, 0, 0 }
 };
 
@@ -1547,13 +1548,17 @@ grub_cmd_listaddrs (grub_extcmd_context_t ctxt,
         }
     }
 
-  FOR_NET_NETWORK_LEVEL_INTERFACES (inf)
-  {
-    grub_net_hwaddr_to_str (&inf->hwaddress, bufh);
-    grub_net_addr_to_str (&inf->address, bufn);
-    grub_net_vlan_to_str (inf->vlantag, bufv);
-    grub_printf ("%s %s %s %s\n", inf->name, bufh, bufn, bufv);
-  }
+  if (ctxt->state[1].set == 0)
+    {
+      FOR_NET_NETWORK_LEVEL_INTERFACES (inf)
+        {
+          grub_net_hwaddr_to_str (&inf->hwaddress, bufh);
+          grub_net_addr_to_str (&inf->address, bufn);
+          grub_net_vlan_to_str (inf->vlantag, bufv);
+          grub_printf ("%s %s %s %s\n", inf->name, bufh, bufn, bufv);
+        }
+    }
+
   return GRUB_ERR_NONE;
 }
 
