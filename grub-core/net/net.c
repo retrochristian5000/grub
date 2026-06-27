@@ -58,6 +58,7 @@ static const struct grub_arg_option options_lscards[] =
   { "set", 's', GRUB_ARG_OPTION_REPEATABLE,
     N_("Set network card NUMBER in VARNAME."),
     N_("[NUMBER:]VARNAME"), ARG_TYPE_STRING },
+  { "quiet", 'q', 0, N_("Do not print output."), 0, 0 },
   { 0, 0, 0, 0, 0, 0 }
 };
 
@@ -1468,11 +1469,15 @@ grub_cmd_listcards (grub_extcmd_context_t ctxt,
         }
     }
 
-  FOR_NET_CARDS(card)
-  {
-    grub_net_hwaddr_to_str (&card->default_address, hwaddrstr);
-    grub_printf ("%s %s\n", card->name, hwaddrstr);
-  }
+  if (ctxt->state[1].set == 0)
+    {
+      FOR_NET_CARDS(card)
+        {
+          grub_net_hwaddr_to_str (&card->default_address, hwaddrstr);
+          grub_printf ("%s %s\n", card->name, hwaddrstr);
+        }
+    }
+
   return GRUB_ERR_NONE;
 }
 
