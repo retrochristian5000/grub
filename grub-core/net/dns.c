@@ -19,8 +19,10 @@
 #include <grub/net.h>
 #include <grub/net/udp.h>
 #include <grub/command.h>
+#include <grub/extcmd.h>
 #include <grub/i18n.h>
 #include <grub/err.h>
+#include <grub/env.h>
 #include <grub/time.h>
 #include <grub/safemath.h>
 
@@ -44,6 +46,12 @@ typedef enum grub_dns_qtype_id
 static struct dns_cache_element dns_cache[DNS_CACHE_SIZE];
 static struct grub_net_network_level_address *dns_servers;
 static grub_size_t dns_nservers, dns_servers_alloc;
+
+static const struct grub_arg_option options_del[] =
+{
+  { "all", 'a', 0, N_("Delete all DNS servers."), 0, 0 },
+  { 0, 0, 0, 0, 0, 0 }
+};
 
 grub_err_t
 grub_net_add_dns_server (const struct grub_net_network_level_address *s)
@@ -744,11 +752,18 @@ grub_cmd_add_dns (struct grub_command *cmd __attribute__ ((unused)),
 }
 
 static grub_err_t
-grub_cmd_del_dns (struct grub_command *cmd __attribute__ ((unused)),
+grub_cmd_del_dns (grub_extcmd_context_t ctxt,
 		  int argc, char **args)
 {
   grub_err_t err;
   struct grub_net_network_level_address server;
+
+  if (ctxt->state[0].set != 0)
+    {
+      while (dns_nservers > 0)
+        grub_net_remove_dns_server (&dns_servers[0]);
+      return GRUB_ERR_NONE;
+    }
 
   if (argc != 1)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("one argument expected"));
@@ -762,7 +777,8 @@ grub_cmd_del_dns (struct grub_command *cmd __attribute__ ((unused)),
   return GRUB_ERR_NONE;
 }
 
-static grub_command_t cmd, cmd_add, cmd_del, cmd_list;
+static grub_command_t cmd, cmd_add, cmd_list;
+static grub_extcmd_t cmd_del;
 
 void
 grub_dns_init (void)
@@ -773,9 +789,10 @@ grub_dns_init (void)
   cmd_add = grub_register_command ("net_add_dns", grub_cmd_add_dns,
 				   N_("DNSSERVER"),
 				   N_("Add a DNS server"));
-  cmd_del = grub_register_command ("net_del_dns", grub_cmd_del_dns,
-				   N_("DNSSERVER"),
-				   N_("Remove a DNS server"));
+  cmd_del = grub_register_extcmd ("net_del_dns", grub_cmd_del_dns, 0,
+				   N_("[--all | DNSSERVER]"),
+				   N_("Remove a DNS server"),
+                                   options_del);
   cmd_list = grub_register_command ("net_ls_dns", grub_cmd_list_dns,
 				   NULL, N_("List DNS servers"));
 }
@@ -785,6 +802,6 @@ grub_dns_fini (void)
 {
   grub_unregister_command (cmd);
   grub_unregister_command (cmd_add);
-  grub_unregister_command (cmd_del);
+  grub_unregister_extcmd (cmd_del);
   grub_unregister_command (cmd_list);
 }
