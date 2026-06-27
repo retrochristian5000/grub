@@ -53,6 +53,14 @@ struct grub_net_link_layer_entry {
 
 #define LINK_LAYER_CACHE_SIZE 256
 
+static const struct grub_arg_option options_lsaddr[] =
+{
+  { "set", 's', GRUB_ARG_OPTION_REPEATABLE,
+    N_("Set address NUMBER in VARNAME."),
+    N_("[NUMBER:]VARNAME"), ARG_TYPE_STRING },
+  { 0, 0, 0, 0, 0, 0 }
+};
+
 static const struct grub_arg_option options_lscards[] =
 {
   { "set", 's', GRUB_ARG_OPTION_REPEATABLE,
@@ -1482,17 +1490,65 @@ grub_cmd_listcards (grub_extcmd_context_t ctxt,
 }
 
 static grub_err_t
-grub_cmd_listaddrs (struct grub_command *cmd __attribute__ ((unused)),
+grub_cmd_listaddrs (grub_extcmd_context_t ctxt,
 		    int argc __attribute__ ((unused)),
 		    char **args __attribute__ ((unused)))
 {
+  int i;
+  unsigned long j;
+  grub_err_t err;
+  char *varname;
+  char **varnames;
+  char *p;
+  const char * q;
   struct grub_net_network_level_interface *inf;
+  char buf[GRUB_NET_MAX_STR_HWADDR_LEN+GRUB_NET_MAX_STR_ADDR_LEN+GRUB_NET_MAX_STR_VLAN_LEN+sizeof("18446744073709551615")];
+  char bufh[GRUB_NET_MAX_STR_HWADDR_LEN];
+  char bufn[GRUB_NET_MAX_STR_ADDR_LEN];
+  char bufv[GRUB_NET_MAX_STR_VLAN_LEN];
+
+  if (ctxt->state[0].set != 0)
+    {
+      err = GRUB_ERR_NONE;
+      varnames = ctxt->state[0].args;
+      for (i = 0; varnames && varnames[i]; i++)
+        {
+          err = GRUB_ERR_NONE;
+          p = grub_strchr (varnames[i], ':');
+          if (! p)
+            {
+              /* varname w/o index defaults to first server */
+              varname = varnames[i];
+              inf = grub_net_network_level_interfaces;
+            }
+          else
+            {
+              j = grub_strtoul (varnames[i], &q, 10);
+              if (q != p)
+                return grub_error (GRUB_ERR_BAD_ARGUMENT,
+                                   "invalid variable name format %s",
+                                    varnames[i]);
+              for(inf = grub_net_network_level_interfaces; (inf && (j > 0)); inf = inf->next)
+                j--;
+              varname = p + 1;
+            }
+          if (inf == NULL)
+            grub_env_unset (varname);
+          else
+            {
+              grub_net_hwaddr_to_str (&inf->hwaddress, bufh);
+              grub_net_addr_to_str (&inf->address, bufn);
+              grub_net_vlan_to_str (inf->vlantag, bufv);
+              grub_snprintf (buf, sizeof(buf), "%s %s %s %s", inf->name, bufh, bufn, bufv);
+              err = grub_env_set (varname, buf);
+            }
+          if (err != GRUB_ERR_NONE)
+            return err;
+        }
+    }
+
   FOR_NET_NETWORK_LEVEL_INTERFACES (inf)
   {
-    char bufh[GRUB_NET_MAX_STR_HWADDR_LEN];
-    char bufn[GRUB_NET_MAX_STR_ADDR_LEN];
-    char bufv[GRUB_NET_MAX_STR_VLAN_LEN];
-
     grub_net_hwaddr_to_str (&inf->hwaddress, bufh);
     grub_net_addr_to_str (&inf->address, bufn);
     grub_net_vlan_to_str (inf->vlantag, bufv);
@@ -2206,8 +2262,8 @@ static struct grub_preboot *fini_hnd;
 
 static grub_command_t cmd_addaddr, cmd_deladdr, cmd_addroute, cmd_delroute;
 static grub_command_t cmd_setvlan, cmd_lsroutes;
-static grub_command_t cmd_lsaddr, cmd_slaac;
-static grub_extcmd_t cmd_lscards;
+static grub_command_t cmd_slaac;
+static grub_extcmd_t cmd_lsaddr, cmd_lscards;
 
 GRUB_MOD_INIT(net)
 {
@@ -2253,8 +2309,10 @@ GRUB_MOD_INIT(net)
 				       N_("[--set=[NUMBER:]VARNAME]"),
                                        N_("list network cards"),
                                        options_lscards);
-  cmd_lsaddr = grub_register_command ("net_ls_addr", grub_cmd_listaddrs,
-				       "", N_("list network addresses"));
+  cmd_lsaddr = grub_register_extcmd ("net_ls_addr", grub_cmd_listaddrs, 0,
+				     N_("[--set=[NUMBER:]VARNAME]"),
+                                     N_("list network addresses"),
+                                     options_lsaddr);
   grub_bootp_init ();
   grub_dns_init ();
 
@@ -2281,7 +2339,7 @@ GRUB_MOD_FINI(net)
   grub_unregister_command (cmd_setvlan);
   grub_unregister_command (cmd_lsroutes);
   grub_unregister_extcmd (cmd_lscards);
-  grub_unregister_command (cmd_lsaddr);
+  grub_unregister_extcmd (cmd_lsaddr);
   grub_unregister_command (cmd_slaac);
   grub_fs_unregister (&grub_net_fs);
   grub_net_open = NULL;
