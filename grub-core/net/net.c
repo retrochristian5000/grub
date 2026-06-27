@@ -25,6 +25,7 @@
 #include <grub/misc.h>
 #include <grub/dl.h>
 #include <grub/command.h>
+#include <grub/extcmd.h>
 #include <grub/env.h>
 #include <grub/net/ethernet.h>
 #include <grub/net/arp.h>
@@ -51,6 +52,14 @@ struct grub_net_link_layer_entry {
 };
 
 #define LINK_LAYER_CACHE_SIZE 256
+
+static const struct grub_arg_option options_lscards[] =
+{
+  { "set", 's', GRUB_ARG_OPTION_REPEATABLE,
+    N_("Set network card NUMBER in VARNAME."),
+    N_("[NUMBER:]VARNAME"), ARG_TYPE_STRING },
+  { 0, 0, 0, 0, 0, 0 }
+};
 
 static struct grub_net_link_layer_entry *
 link_layer_find_entry (const grub_net_network_level_address_t *proto,
@@ -1406,16 +1415,63 @@ grub_cmd_listroutes (struct grub_command *cmd __attribute__ ((unused)),
 }
 
 static grub_err_t
-grub_cmd_listcards (struct grub_command *cmd __attribute__ ((unused)),
+grub_cmd_listcards (grub_extcmd_context_t ctxt,
 		    int argc __attribute__ ((unused)),
 		    char **args __attribute__ ((unused)))
 {
+  int      i;
   struct grub_net_card *card;
+  char hwaddrstr[GRUB_NET_MAX_STR_HWADDR_LEN];
+  char buf[GRUB_NET_MAX_STR_HWADDR_LEN+sizeof("18446744073709551615")];
+  unsigned long j;
+  grub_err_t err;
+  char *varname;
+  char **varnames;
+  char *p;
+  const char * q;
+
+  if (ctxt->state[0].set != 0)
+    {
+      err = GRUB_ERR_NONE;
+      varnames = ctxt->state[0].args;
+      for (i = 0; varnames && varnames[i]; i++)
+        {
+          err = GRUB_ERR_NONE;
+          p = grub_strchr (varnames[i], ':');
+          if (! p)
+            {
+              /* varname w/o index defaults to first server */
+              varname = varnames[i];
+              card = grub_net_cards;
+            }
+          else
+            {
+              j = grub_strtoul (varnames[i], &q, 10);
+              if (q != p)
+                return grub_error (GRUB_ERR_BAD_ARGUMENT,
+                                   "invalid variable name format %s",
+                                    varnames[i]);
+              for(card = grub_net_cards; (card && (j > 0)); card = card->next)
+                j--;
+              varname = p + 1;
+            }
+          if (card == NULL)
+            grub_env_unset (varname);
+          else
+            {
+              grub_net_hwaddr_to_str (&card->default_address, hwaddrstr);
+              grub_snprintf(buf, sizeof (buf), "%s %s", card->name, hwaddrstr);
+              err = grub_env_set (varname, buf);
+            }
+          if (err != GRUB_ERR_NONE)
+            return err;
+        }
+    }
+
   FOR_NET_CARDS(card)
   {
-    char buf[GRUB_NET_MAX_STR_HWADDR_LEN];
-    grub_net_hwaddr_to_str (&card->default_address, buf);
-    grub_printf ("%s %s\n", card->name, buf);
+    grub_net_hwaddr_to_str (&card->default_address, hwaddrstr);
+    grub_printf ("%s %s\n", card->name, hwaddrstr);
   }
   return GRUB_ERR_NONE;
 }
@@ -2144,8 +2200,9 @@ grub_net_search_config_file (char *config, grub_size_t config_buf_len)
 static struct grub_preboot *fini_hnd;
 
 static grub_command_t cmd_addaddr, cmd_deladdr, cmd_addroute, cmd_delroute;
-static grub_command_t cmd_setvlan, cmd_lsroutes, cmd_lscards;
+static grub_command_t cmd_setvlan, cmd_lsroutes;
 static grub_command_t cmd_lsaddr, cmd_slaac;
+static grub_extcmd_t cmd_lscards;
 
 GRUB_MOD_INIT(net)
 {
@@ -2187,8 +2244,10 @@ GRUB_MOD_INIT(net)
 				       N_("Set an interface's vlan id."));
   cmd_lsroutes = grub_register_command ("net_ls_routes", grub_cmd_listroutes,
 					"", N_("list network routes"));
-  cmd_lscards = grub_register_command ("net_ls_cards", grub_cmd_listcards,
-				       "", N_("list network cards"));
+  cmd_lscards = grub_register_extcmd ("net_ls_cards", grub_cmd_listcards, 0,
+				       N_("[--set=[NUMBER:]VARNAME]"),
+                                       N_("list network cards"),
+                                       options_lscards);
   cmd_lsaddr = grub_register_command ("net_ls_addr", grub_cmd_listaddrs,
 				       "", N_("list network addresses"));
   grub_bootp_init ();
@@ -2216,7 +2275,7 @@ GRUB_MOD_FINI(net)
   grub_unregister_command (cmd_delroute);
   grub_unregister_command (cmd_setvlan);
   grub_unregister_command (cmd_lsroutes);
-  grub_unregister_command (cmd_lscards);
+  grub_unregister_extcmd (cmd_lscards);
   grub_unregister_command (cmd_lsaddr);
   grub_unregister_command (cmd_slaac);
   grub_fs_unregister (&grub_net_fs);
