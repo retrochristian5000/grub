@@ -59,6 +59,12 @@ static const struct grub_arg_option options_deladdr[] =
   { 0, 0, 0, 0, 0, 0 }
 };
 
+static const struct grub_arg_option options_delroute[] =
+{
+  { "all", 'a', 0, N_("delete all routes."), 0, 0 },
+  { 0, 0, 0, 0, 0, 0 }
+};
+
 static const struct grub_arg_option options_lsaddr[] =
 {
   { "set", 's', GRUB_ARG_OPTION_REPEATABLE,
@@ -1239,11 +1245,28 @@ grub_cmd_addaddr (struct grub_command *cmd __attribute__ ((unused)),
 }
 
 static grub_err_t
-grub_cmd_delroute (struct grub_command *cmd __attribute__ ((unused)),
-		   int argc, char **args)
+grub_cmd_delroute (grub_extcmd_context_t ctxt, int argc, char **args)
 {
   struct grub_net_route *route;
+  struct grub_net_route *route_next;
   struct grub_net_route **prev;
+
+  /* delete all routes if requested */
+  if (ctxt->state[0].set != 0)
+    {
+      if (argc != 0)
+        return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("cannot specify argument with --all"));
+      route = grub_net_routes;
+      while ( route )
+        {
+          route_next = route->next;
+          grub_free (route->name); 
+          grub_free (route);
+          route = route_next;
+        }
+      grub_net_routes = NULL;
+      return GRUB_ERR_NONE;
+    }
 
   if (argc != 1)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("one argument expected"));
@@ -2294,10 +2317,10 @@ grub_net_search_config_file (char *config, grub_size_t config_buf_len)
 
 static struct grub_preboot *fini_hnd;
 
-static grub_command_t cmd_addaddr, cmd_addroute, cmd_delroute;
+static grub_command_t cmd_addaddr, cmd_addroute;
 static grub_command_t cmd_setvlan, cmd_lsroutes;
 static grub_command_t cmd_slaac;
-static grub_extcmd_t cmd_deladdr;
+static grub_extcmd_t cmd_deladdr, cmd_delroute;
 static grub_extcmd_t cmd_lsaddr, cmd_lscards;
 
 GRUB_MOD_INIT(net)
@@ -2333,9 +2356,10 @@ GRUB_MOD_INIT(net)
 					/* TRANSLATORS: "gw" is a keyword.  */
 					N_("SHORTNAME NET [INTERFACE| gw GATEWAY]"),
 					N_("Add a network route."));
-  cmd_delroute = grub_register_command ("net_del_route", grub_cmd_delroute,
-					N_("SHORTNAME"),
-					N_("Delete a network route."));
+  cmd_delroute = grub_register_extcmd ("net_del_route", grub_cmd_delroute, 0,
+					N_("[--all|SHORTNAME]"),
+					N_("Delete a network route."),
+					options_delroute);
   cmd_setvlan = grub_register_command ("net_set_vlan", grub_cmd_setvlan,
 				       N_("SHORTNAME VLANID"),
 				       N_("Set an interface's vlan id."));
@@ -2371,7 +2395,7 @@ GRUB_MOD_FINI(net)
   grub_unregister_command (cmd_addaddr);
   grub_unregister_extcmd (cmd_deladdr);
   grub_unregister_command (cmd_addroute);
-  grub_unregister_command (cmd_delroute);
+  grub_unregister_extcmd (cmd_delroute);
   grub_unregister_command (cmd_setvlan);
   grub_unregister_command (cmd_lsroutes);
   grub_unregister_extcmd (cmd_lscards);
