@@ -9124,12 +9124,13 @@ Note: The command is not allowed when lockdown is enforced (@pxref{Lockdown}).
 @node net_add_addr
 @subsection net_add_addr
 
-@deffn Command net_add_addr @var{interface} @var{card} @var{address}
+@deffn Command net_add_addr @var{interface[/PREFIX]} @var{card} @var{address}
 Configure additional network @var{interface} with @var{address} on a
 network @var{card}. @var{address} can be either IP in dotted decimal notation,
 or symbolic name which is resolved using DNS lookup. If successful, this command
-also adds local link routing entry to the default subnet of @var{address}
-with name @var{interface}@samp{:local} via @var{interface}.
+also adds local link routing entry with name @var{interface}@samp{:local} via
+@var{interface}. The local link routing entry is created with the default
+subnet of @var{address} if @var{/PREFIX} is not specified.
 @end deffn
 
 
