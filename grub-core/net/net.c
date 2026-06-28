@@ -1161,6 +1161,9 @@ grub_cmd_addaddr (struct grub_command *cmd __attribute__ ((unused)),
   grub_err_t err;
   grub_net_interface_flags_t flags = 0;
   struct grub_net_network_level_interface *inf;
+  char *p;
+  int cidr;
+  const char * q;
 
   if (argc != 3)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("three arguments expected"));
@@ -1170,6 +1173,16 @@ grub_cmd_addaddr (struct grub_command *cmd __attribute__ ((unused)),
       break;
   if (card == NULL)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("card not found"));
+
+  p = grub_strchr (args[2], '/');
+  cidr = -1;
+  if (p)
+    {
+      cidr = (int)grub_strtol(&p[1], &q, 10);
+      if ( (! q) || (q[0] != '\0') || (cidr > 31) || (cidr < 0) )
+        return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("invalid network prefix"));
+      p[0] = '\0';
+    }
 
   err = grub_net_resolve_address (args[2], &addr);
   if (err)
@@ -1185,7 +1198,7 @@ grub_cmd_addaddr (struct grub_command *cmd __attribute__ ((unused)),
   inf = grub_net_add_addr (args[0], card, &addr, &card->default_address,
 			   flags);
   if (inf)
-    grub_net_add_ipv4_local (inf, -1);
+    grub_net_add_ipv4_local (inf, cidr);
 
   return grub_errno;
 }
@@ -2165,7 +2178,7 @@ GRUB_MOD_INIT(net)
   cmd_addaddr = grub_register_command ("net_add_addr", grub_cmd_addaddr,
 					/* TRANSLATORS: HWADDRESS stands for
 					   "hardware address".  */
-				       N_("SHORTNAME CARD ADDRESS [HWADDRESS]"),
+				       N_("SHORTNAME CARD ADDRESS[/PREFIX] [HWADDRESS]"),
 				       N_("Add a network address."));
   cmd_slaac = grub_register_command ("net_ipv6_autoconf",
 				     grub_cmd_ipv6_autoconf,
