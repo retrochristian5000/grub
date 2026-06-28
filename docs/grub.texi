@@ -9178,24 +9178,27 @@ patch set. It will perform the same DHCPv6 handshake with the net_dhcp6 command
 @node net_del_addr
 @subsection net_del_addr
 
-@deffn Command net_del_addr @var{interface}
-Remove configured @var{interface} with associated address.
+@deffn Command net_del_addr [@var{--all}|@var{interface}]
+Remove configured @var{interface} with associated address. If option
+@option{--all} is given, all configured interfaces will be removed.
 @end deffn
 
 
 @node net_del_dns
 @subsection net_del_dns
 
-@deffn Command net_del_dns @var{address}
-Remove @var{address} from list of servers used during name lookup.
+@deffn Command net_del_dns [@var{--all}|@var{address}]
+Remove @var{address} from list of servers used during name lookup. If option
+@option{--all} is given, all servers are removed.
 @end deffn
 
 
 @node net_del_route
 @subsection net_del_route
 
-@deffn Command net_del_route @var{shortname}
-Remove route entry identified by @var{shortname}.
+@deffn Command net_del_route [@var{--all}|@var{shortname}]
+Remove route entry identified by @var{shortname}. If option @option{--all} is
+given, all route entries are removed.
 @end deffn
 
 
@@ -9278,24 +9281,30 @@ perform autoconfiguration for all existing cards.
 @node net_ls_addr
 @subsection net_ls_addr
 
-@deffn Command net_ls_addr
-List all configured interfaces with their MAC and IP addresses.
+@deffn Command net_ls_addr [@option{--set} [number:]var]
+List all configured interfaces with their MAC and IP addresses.  If option
+@option{--set} is given, store @var{number}th configured interface with its
+MAC address in variable @var{var}. @var{number} defaults to @samp{0}.
 @end deffn
 
 
 @node net_ls_cards
 @subsection net_ls_cards
 
-@deffn Command net_ls_cards
-List all detected network cards with their MAC address.
+@deffn Command net_ls_cards [@option{--set} [number:]var]
+List all detected network cards with their MAC address. If option
+@option{--set} is given, store @var{number}th network card with its
+MAC address in variable @var{var}. @var{number} defaults to @samp{0}.
 @end deffn
 
 
 @node net_ls_dns
 @subsection net_ls_dns
 
-@deffn Command net_ls_dns
-List addresses of DNS servers used during name lookup.
+@deffn Command net_ls_dns [@option{--set} [number:]var]
+List addresses of DNS servers used during name lookup. If option
+@option{--set} is given, store @var{number}th DNS server in
+variable @var{var}. @var{number} defaults to @samp{0}.
 @end deffn
 
 
