@@ -227,11 +227,8 @@ grub_cmd_calc(
 
          case CALC_OP_POW:
               if (num2 == 0)
-              {  if (num1 == 0)
+                 if (num1 == 0)
                     return( grub_error(GRUB_ERR_BAD_ARGUMENT, N_("cannot raise zero to the power of zero")) );
-                 num1 = 0;
-                 break;
-              };
               if (num2 < 0)
               {  if (num1 == 0)
                     return( grub_error(GRUB_ERR_BAD_ARGUMENT, N_("cannot raise zero to a negative power")) );
