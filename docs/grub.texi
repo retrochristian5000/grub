@@ -7290,8 +7290,6 @@ grub> @kbd{calc -- -42 pow 4}
 @item
 @var{not} - bitwise NOT operation
 @item
-@var{neg} - same as @var{not}
-@item
 @var{lsh} @var{NUMBER} - bitwise left shift operation
 @item
 @var{rsh} @var{NUMBER} - bitwise right shift operation

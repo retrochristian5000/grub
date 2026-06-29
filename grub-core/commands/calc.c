@@ -92,7 +92,6 @@ static struct
    { "OR",     CALC_OP_OR,      1 },
    { "XOR",    CALC_OP_XOR,     1 },
    { "NOT",    CALC_OP_NOT,     0 },
-   { "NEG",    CALC_OP_NOT,     0 },
    { "LSH",    CALC_OP_LSHIFT,  1 },
    { "RSH",    CALC_OP_RSHIFT,  1 },
    { "LSHIFT", CALC_OP_LSHIFT,  1 },
