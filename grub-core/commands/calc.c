@@ -249,7 +249,7 @@ grub_cmd_calc(
    format_result(num1, res, sizeof(res), base, padding);
 
    if (ctxt->state[5].set == 0)
-   {  grub_printf("%s", res);
+   {  grub_printf("%s\n", res);
       return(0);
    };
 
