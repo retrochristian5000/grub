@@ -1,7 +1,7 @@
 /* calc.c -- The calc command.  */
 /*
  *  GRUB  --  GRand Unified Bootloader
- *  Copyright (C) 2026  David M. Syzdek <david@syzdek.net>
+ *  Copyright (C) 2026 Free Software Foundation, Inc.
  *
  *  GRUB is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
