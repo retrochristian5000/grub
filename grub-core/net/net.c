@@ -1179,7 +1179,7 @@ grub_cmd_addaddr (struct grub_command *cmd __attribute__ ((unused)),
   if (p)
     {
       cidr = (int)grub_strtol(&p[1], &q, 10);
-      if ( (! q) || (q[0] != '\0') || (cidr > 31) || (cidr < 0) )
+      if ( (! q) || (q[0] != '\0') || (cidr > 31) || (cidr < 1) )
         return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("invalid network prefix"));
       p[0] = '\0';
     }
