@@ -508,8 +508,12 @@ parse_ip6 (const char *val, grub_uint64_t *ip, const char **rest)
       grub_memset (&newip[quaddot], 0, (7 - word) * sizeof (newip[0]));
     }
   grub_memcpy (ip, newip, 16);
-  if (bracketed && *ptr == ']')
-    ptr++;
+  if (bracketed)
+    {
+      if (*ptr != ']')
+        return 0;
+      ptr++;
+    }
   if (rest)
     *rest = ptr;
   return 1;
