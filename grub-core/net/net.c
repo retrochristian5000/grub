@@ -484,6 +484,8 @@ parse_ip6 (const char *val, grub_uint64_t *ip, const char **rest)
 	  quaddot = word;
 	  word--;
 	  ptr++;
+	  if (*ptr == ':')
+	    return 0;
 	  continue;
 	}
       t = grub_strtoul (ptr, &ptr, 16);
