@@ -462,10 +462,10 @@ parse_ip6 (const char *val, grub_uint64_t *ip, const char **rest)
 {
   grub_uint16_t newip[8];
   const char *ptr = val;
-  int word, quaddot = -1;
+  int word, byte, quaddot = -1;
   bool bracketed = false;
   bool zerocompress = false;
-  unsigned long t;
+  unsigned long t, ip4, base;
 
   if (ptr[0] == '[')
     {
@@ -501,6 +501,41 @@ parse_ip6 (const char *val, grub_uint64_t *ip, const char **rest)
       if (t & ~0xffff)
 	return 0;
       newip[word] = grub_cpu_to_be16 (t);
+
+      /* check for IPv4-mapped IPv6 presentation */
+      if (*ptr == '.')
+	{
+	  if (t > 0x255 || word > 6)
+	    return 0;
+	  ip4 = 0;
+	  base = 1;
+	  while (t > 0)
+	    {
+	      ip4 += (t % 16) * base;
+	      base *= 10;
+	      t /= 16;
+	    }
+	  for (byte = 1; byte < 4; byte++)
+	    {
+	      if (*ptr != '.')
+	        return 0;
+	      ptr++;
+	      t = grub_strtoul (ptr, &ptr, 10);
+	      if (grub_errno)
+	        return 0;
+	      if (t & ~0xff)
+	        return 0;
+	      ip4 = (ip4 << 8) | t;
+	      if (byte == 1)
+		{
+		  newip[word++] = grub_cpu_to_be16 (ip4);
+		  ip4 = 0;
+		}
+	    }
+	  newip[word] = grub_cpu_to_be16 (ip4);
+	  break;
+	}
+
       if (*ptr != ':')
 	break;
       ptr++;
