@@ -464,6 +464,7 @@ parse_ip6 (const char *val, grub_uint64_t *ip, const char **rest)
   const char *ptr = val;
   int word, quaddot = -1;
   bool bracketed = false;
+  bool zerocompress = false;
   unsigned long t;
 
   if (ptr[0] == '[')
@@ -481,6 +482,9 @@ parse_ip6 (const char *val, grub_uint64_t *ip, const char **rest)
     {
       if (*ptr == ':')
 	{
+	  if (zerocompress)
+	    return 0;
+	  zerocompress = true;
 	  quaddot = word;
 	  word--;
 	  ptr++;
