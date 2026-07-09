@@ -542,6 +542,8 @@ parse_ip6 (const char *val, grub_uint64_t *ip, const char **rest)
     }
   if (quaddot == -1 && word < 7)
     return 0;
+  if (quaddot != -1 && word == 7)
+    return 0;
   if (quaddot != -1)
     {
       grub_memmove (&newip[quaddot + 7 - word], &newip[quaddot],
