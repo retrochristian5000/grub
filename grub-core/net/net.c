@@ -507,6 +507,10 @@ parse_ip6 (const char *val, grub_uint64_t *ip, const char **rest)
 	{
 	  if (t > 0x255 || word > 6)
 	    return 0;
+          if ((t & 0x0f) > 0x09)
+             return 0;
+          if ((t & 0xf0) > 0x90)
+             return 0;
 	  ip4 = 0;
 	  base = 1;
 	  while (t > 0)
