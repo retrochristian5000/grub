@@ -548,6 +548,12 @@ parse_ip6 (const char *val, grub_uint64_t *ip, const char **rest)
     return 0;
   if (quaddot != -1 && word == 7)
     return 0;
+  if (bracketed)
+    {
+      if (*ptr != ']')
+        return 0;
+      ptr++;
+    }
   if (quaddot != -1)
     {
       grub_memmove (&newip[quaddot + 7 - word], &newip[quaddot],
@@ -555,12 +561,6 @@ parse_ip6 (const char *val, grub_uint64_t *ip, const char **rest)
       grub_memset (&newip[quaddot], 0, (7 - word) * sizeof (newip[0]));
     }
   grub_memcpy (ip, newip, 16);
-  if (bracketed)
-    {
-      if (*ptr != ']')
-        return 0;
-      ptr++;
-    }
   if (rest)
     *rest = ptr;
   return 1;
