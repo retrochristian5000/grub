@@ -51,6 +51,20 @@ grub_cmd_calc(
          char **                       args );
 
 
+static grub_err_t
+grub_cmd_decrement(
+         grub_extcmd_context_t         ctxt,
+         int                           argc,
+         char **                       args );
+
+
+static grub_err_t
+grub_cmd_increment(
+         grub_extcmd_context_t         ctxt,
+         int                           argc,
+         char **                       args );
+
+
 static int
 format_result(
          long                          input,
@@ -72,7 +86,17 @@ parse_operation(
          int *                         req_num );
 
 
+static grub_err_t
+perform_increment(
+         grub_extcmd_context_t         ctxt,
+         int                           argc,
+         char **                       args,
+         long                          dflt );
+
+
 static grub_extcmd_t cmd_calc;
+static grub_extcmd_t cmd_decrement;
+static grub_extcmd_t cmd_increment;
 
 
 static struct
@@ -115,18 +139,41 @@ static const struct grub_arg_option options_calc[] =
 };
 
 
+static const struct grub_arg_option options_increment[] =
+{
+   { "binary",  'B', 0, N_("represent result using bianry."),        0, 0 },
+   { "octal",   'O', 0, N_("represent result using octal."),         0, 0 },
+   { "decimal", 'D', 0, N_("represent result using decimal."),       0, 0 },
+   { "hex",     'H', 0, N_("represent result using hexadecimal."),   0, 0 },
+   { "verbose", 'v', 0, N_("print result to console."),              0, 0 },
+   { "pad",     'p', 0, N_("pad result to LENGTH digits with zeros."),
+                        N_("LENGTH"), ARG_TYPE_INT },
+   { 0, 0, 0, 0, 0, 0 }
+};
+
+
 GRUB_MOD_INIT(calc)
 {
    cmd_calc = grub_register_extcmd( "calc", grub_cmd_calc, 0,
                                     N_("NUMBER [EXPRESSION [... [EXPRESSION]]]"),
                                     N_("perform mathematical and bitwise operations."),
                                     options_calc );
+   cmd_increment = grub_register_extcmd( "increment", grub_cmd_increment, 0,
+                                         N_("VARNAME [NUMBER]"),
+                                         N_("increment the value of VARNAME."),
+                                         options_increment );
+   cmd_decrement = grub_register_extcmd( "decrement", grub_cmd_decrement, 0,
+                                         N_("VARNAME [NUMBER]"),
+                                         N_("decrement the value of VARNAME."),
+                                         options_increment );
 }
 
 
 GRUB_MOD_FINI(calc)
 {
    grub_unregister_extcmd (cmd_calc);
+   grub_unregister_extcmd (cmd_decrement);
+   grub_unregister_extcmd (cmd_increment);
 }
 
 
@@ -255,6 +302,26 @@ grub_cmd_calc(
    grub_env_set(ctxt->state[5].arg, res);
 
    return(0);
+}
+
+
+grub_err_t
+grub_cmd_decrement(
+         grub_extcmd_context_t         ctxt,
+         int                           argc,
+         char **                       args )
+{
+   return(perform_increment(ctxt, argc, args, -1));
+}
+
+
+grub_err_t
+grub_cmd_increment(
+         grub_extcmd_context_t         ctxt,
+         int                           argc,
+         char **                       args )
+{
+   return(perform_increment(ctxt, argc, args, 1));
 }
 
 
@@ -420,4 +487,62 @@ parse_operation(
    };
 
    return(-1);
+}
+
+
+grub_err_t
+perform_increment(             
+         grub_extcmd_context_t         ctxt,
+         int                           argc,
+         char **                       args,
+         long                          dflt )
+{
+   grub_size_t    padding;
+   int            base;
+   int            verbose;
+   long           num;
+   long           incr;
+   const char *   val;
+   char           res[(sizeof(long)*8) + 5];
+
+   if (argc < 1)
+      return( grub_error(GRUB_ERR_BAD_ARGUMENT, N_("missing argument")) );
+   if (argc > 2)
+      return( grub_error(GRUB_ERR_BAD_ARGUMENT, N_("unknown argument")) );
+
+   if      (ctxt->state[0].set != 0) base =  2; /* long option --binary */
+   else if (ctxt->state[1].set != 0) base =  8; /* long option --octal */
+   else if (ctxt->state[2].set != 0) base = 10; /* long option --decimal */
+   else if (ctxt->state[3].set != 0) base = 16; /* long option --hexadecimal */
+   else                              base = 10;
+
+   verbose = (ctxt->state[4].set != 0) ? 1 : 0; /* long option --verbose */
+
+   padding = 0;
+   if (ctxt->state[5].set != 0) /* long option --pad=LENGTH */
+      padding = (grub_size_t)grub_strtoul(ctxt->state[5].arg, NULL, 0);
+   if (padding > (sizeof(res)-2))
+      return( grub_error(GRUB_ERR_BAD_ARGUMENT, N_("padding LENGTH exceeds buffer size")) );
+
+   val = grub_env_get(args[0]);
+   if (val == NULL)
+      return( grub_error(GRUB_ERR_FILE_NOT_FOUND, N_("no such variable \"%s\""), args[0]) );
+   if (parse_number(val, &num) != 0)
+      return( grub_error(GRUB_ERR_BAD_ARGUMENT, N_("invalid numeric value in \"%s\""), args[0]) );
+
+   incr = 1;
+   if (argc > 1)
+      if (parse_number(args[1], &incr) != 0)
+         return( grub_error(GRUB_ERR_BAD_ARGUMENT, N_("invalid numeric argument")) );
+   incr *= dflt;
+
+   num += incr;
+
+   format_result(num, res, sizeof(res), base, padding);
+   if (verbose)
+      grub_printf("%s\n", res);
+
+   grub_env_set (args[0], res);
+
+   return(GRUB_ERR_NONE);
 }
