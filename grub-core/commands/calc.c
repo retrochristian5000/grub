@@ -72,7 +72,7 @@ parse_operation(
          int *                         req_num );
 
 
-static grub_extcmd_t cmd;
+static grub_extcmd_t cmd_calc;
 
 
 static struct
@@ -100,7 +100,7 @@ static struct
 };
 
 
-static const struct grub_arg_option options[] =
+static const struct grub_arg_option options_calc[] =
 {
    { "binary",  'B', 0, N_("represent result using bianry."),        0, 0 },
    { "octal",   'O', 0, N_("represent result using octal."),         0, 0 },
@@ -117,16 +117,16 @@ static const struct grub_arg_option options[] =
 
 GRUB_MOD_INIT(calc)
 {
-   cmd = grub_register_extcmd( "calc", grub_cmd_calc, 0,
-                               N_("NUMBER [EXPRESSION [... [EXPRESSION]]]"),
-                               N_("perform mathematical and bitwise operations."),
-                               options );
+   cmd_calc = grub_register_extcmd( "calc", grub_cmd_calc, 0,
+                                    N_("NUMBER [EXPRESSION [... [EXPRESSION]]]"),
+                                    N_("perform mathematical and bitwise operations."),
+                                    options_calc );
 }
 
 
 GRUB_MOD_FINI(calc)
 {
-   grub_unregister_extcmd (cmd);
+   grub_unregister_extcmd (cmd_calc);
 }
 
 
