@@ -45,9 +45,10 @@ fi
 #     efibootmenu command that discovers the boot options at boot time
 #     instead.  Works where grub.cfg is regenerated on a different host or
 #     the grub.d scripts are not run, as long as grub.cfg invokes the
-#     command.  It identifies its own entry via BootCurrent rather than
-#     the install-based SELF_* detection, so it cannot exclude self across
-#     a chainload.
+#     command.  It excludes its own entry by matching the running image's
+#     ESP partition and \EFI\<vendor>\ dir (the same basis as the SELF_*
+#     detection below), falling back to BootCurrent only when the running
+#     image cannot be identified.
 if [ "${GRUB_BOOTNEXT_DISCOVER_AT_BOOT}" = "true" ]; then
     FLAGS=
     if [ "${GRUB_BOOTNEXT_OMIT_INACTIVE}" = "true" ]; then

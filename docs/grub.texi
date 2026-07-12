@@ -1596,10 +1596,10 @@ static menu entries.  @command{efibootmenu} discovers the EFI boot options
 at boot time rather than at @command{grub-mkconfig} time, so the entries
 reflect the firmware's current boot options even when @file{grub.cfg} was
 generated on another host or shipped without running the @file{grub.d}
-scripts.  In this mode the running entry is identified via
-@samp{BootCurrent}, which cannot recognise a chainloaded @command{grub}, so
-the config-time default is preferred where the generating host's NVRAM is
-available.  The @samp{GRUB_BOOTNEXT_OMIT_INACTIVE},
+scripts.  @command{efibootmenu} excludes its own entry by matching the
+running image's ESP partition and @file{\EFI\<vendor>\} directory -- the same
+basis as the config-time path -- falling back to @samp{BootCurrent} only when
+the running image cannot be identified.  The @samp{GRUB_BOOTNEXT_OMIT_INACTIVE},
 @samp{GRUB_SAVEDEFAULT} and @samp{GRUB_BOOTNEXT_CATEGORY_BOOT_ONLY} knobs map to
 the command's @option{--omit-inactive}, @option{--savedefault} and
 @option{--category-boot-only} flags.  Unlike the config-time path,

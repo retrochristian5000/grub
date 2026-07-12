@@ -28,7 +28,7 @@
  *
  *    efibootmenu [OPTIONS]
  *      A menu entry per firmware boot option, discovered at boot time.  (In
- *      efibootnext_menu.c.)
+ *      efibootnext_menu.c; self-identification in efibootnext_self.c.)
  */
 
 #include <grub/charset.h>
@@ -48,7 +48,8 @@ GRUB_MOD_LICENSE ("GPLv3+");
 
 grub_uint8_t *
 grub_efibootnext_decode_option (const void *option, grub_size_t size,
-                                grub_uint32_t *attrs_out)
+                                grub_uint32_t *attrs_out,
+                                const void **fpl_out, grub_size_t *fpl_len_out)
 {
   const grub_size_t hdr = sizeof (grub_efi_uint32_t) + sizeof (grub_efi_uint16_t);
   grub_size_t max16, len = 0;
@@ -56,12 +57,16 @@ grub_efibootnext_decode_option (const void *option, grub_size_t size,
   grub_uint8_t *label = NULL;
 
   /*
-   * The attributes output is cleared up front so every early return below
-   * (malformed or truncated option) still leaves the caller with a defined
-   * "no attributes" result.
+   * The outputs are cleared up front so every early return below (malformed
+   * or truncated option) still leaves the caller with defined "no
+   * attributes, no FilePathList" results.
    */
   if (attrs_out != NULL)
     *attrs_out = 0;
+  if (fpl_out != NULL)
+    *fpl_out = NULL;
+  if (fpl_len_out != NULL)
+    *fpl_len_out = 0;
 
   if (attrs_out != NULL && size >= sizeof (grub_efi_uint32_t))
     grub_memcpy (attrs_out, option, sizeof (*attrs_out));
@@ -95,6 +100,26 @@ grub_efibootnext_decode_option (const void *option, grub_size_t size,
     *grub_utf16_to_utf8 (label, desc, len) = '\0';
 
   grub_free (desc);
+
+  /*
+   * The FilePathList follows the description's NUL terminator.  Expose it
+   * only when the declared length fits inside the variable, so callers get
+   * pre-validated bounds.
+   */
+  if (fpl_out != NULL && fpl_len_out != NULL)
+    {
+      grub_efi_uint16_t fpl_len;
+      grub_size_t off = hdr + (len + 1) * sizeof (grub_efi_char16_t);
+
+      grub_memcpy (&fpl_len, (const grub_uint8_t *) option
+                   + sizeof (grub_efi_uint32_t), sizeof (fpl_len));
+      if (fpl_len <= size - off)
+        {
+          *fpl_out = (const grub_uint8_t *) option + off;
+          *fpl_len_out = fpl_len;
+        }
+    }
+
   return label;
 }
 
@@ -151,7 +176,7 @@ grub_cmd_bootnext (grub_command_t cmd __attribute__ ((unused)),
    * undecodable entry is not fatal: BootNext is still set, just without a
    * label, so clear any error the decode left behind.
    */
-  label = grub_efibootnext_decode_option (option, option_size, NULL);
+  label = grub_efibootnext_decode_option (option, option_size, NULL, NULL, NULL);
   grub_errno = GRUB_ERR_NONE;
 
   status = grub_efi_set_variable ("BootNext", &global,
