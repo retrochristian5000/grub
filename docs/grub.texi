@@ -4620,9 +4620,10 @@ statistics on disk cache accesses. This module is only built if
 
 @node calc_module
 @section calc
-This module provides support for the @command{calc} command to perform simple
-mathematical calculations and bitwise operations.  @xref{calc} for more
-information.
+This module provides support for the @command{calc}, @command{decrement},
+and @command{increment} commands which perform simple mathematical calculations
+and bitwise operations.  @xref{calc}, @xref{decrement}, and @xref{increment}
+for more information.
 
 @node cat_module
 @section cat
@@ -6825,6 +6826,7 @@ you forget a command, you can run the command @command{help}
 * cryptomount::                 Mount a crypto device
 * cutmem::                      Remove memory regions
 * date::                        Display or set current date and time
+* decrement::                   Decrement numeric value of variable
 * devicetree::                  Load a device tree blob
 * distrust::                    Remove a pubkey from trusted keys
 * drivemap::                    Map a drive to another
@@ -6845,6 +6847,7 @@ you forget a command, you can run the command @command{help}
 * hashsum::                     Compute or check hash checksum
 * help::                        Show help messages
 * hexdump::                     Show raw contents of a file or memory
+* increment::                   Increment numeric value of variable
 * insmod::                      Insert a module
 * keystatus::                   Check key modifier status
 * list_env::                    List variables in environment block
@@ -7545,6 +7548,51 @@ hour, minute, and second unchanged.
 @end deffn
 
 
+@node decrement
+@subsection decrement
+
+@deffn Command decrement [@option{--verbose}] [@option{--pad=LENGTH}] [number_system] VARNAME [NUMBER]
+Decrement the numeric value of @var{VARNAME} by 1.  If @var{NUMBER} is
+specifiied, decrement the numeric value of @var{VARNAME} by @var{NUMBER}.
+Save the result to @var{VARNAME}.  If @var{number_system} is specified,
+format the result using the specified number system.  If @option{--verbose}
+is given, the result will also be displayed to the console. The @option{--pad=LENGTH}
+option specifies that the result should be represented using at least @var{LENGTH}
+digits.
+
+@var{number_system} may be one of the following options:
+@itemize @bullet
+@item
+@option{--binary} Represent result using binary number system
+@item
+@option{--octal} Represent result using octal number system
+@item
+@option{--decimal} Represent result using decimal number system
+@item
+@option{--hex} Represent result using dhexadecimal number system
+@end itemize
+
+Example usage:
+@example
+grub> @kbd{counter=11}
+grub> @kbd{decrement counter 2}
+grub> @kbd{echo $@{counter@}}
+9
+grub> @kbd{decrement --hex --pad=8 counter 3}
+grub> @kbd{echo $@{counter@}}
+0x00000006
+grub> @kbd{decrement counter 5}
+grub> @kbd{echo $@{counter@}}
+1
+grub> @kbd{decrement counter}
+grub> @kbd{echo $@{counter@}  }
+0
+grub>
+@end example
+
+@end deffn
+
+
 @node devicetree
 @subsection devicetree
 
@@ -7975,6 +8023,52 @@ If given the special device named @samp{(mem)}, then the @samp{offset} given to
 Note: The dumping of RAM memory (by the (mem) argument) is not allowed when
 when lockdown is enforced (@pxref{Lockdown}). The dumping of disk or file
 data is allowed when lockdown is enforced.
+
+@end deffn
+
+
+@node increment                 
+@subsection increment
+
+@deffn Command increment [@option{--verbose}] [@option{--pad=LENGTH}] [number_system] VARNAME [NUMBER]
+Increment the numeric value of @var{VARNAME} by 1.  If @var{NUMBER} is
+specifiied, increment the numeric value of @var{VARNAME} by @var{NUMBER}.
+The result is saved to @var{VARNAME}.  If @var{number_system} is specified,
+format the result using the specified number system.  If @option{--verbose}
+is given, the result will also be displayed to the console. The @option{--pad=LENGTH}
+option specifies that the result should be represented using at least @var{LENGTH}
+digits.
+
+@var{number_system} may be one of the following options:
+@itemize @bullet
+@item
+@option{--binary} Represent result using binary number system
+@item
+@option{--octal} Represent result using octal number system
+@item
+@option{--decimal} Represent result using decimal number system
+@item
+@option{--hex} Represent result using dhexadecimal number system
+@end itemize
+
+Example usage:
+@example
+grub> @kbd{counter=0}
+grub> @kbd{export counter}
+grub> @kbd{increment counter}
+grub> @kbd{echo $@{counter@}}
+1
+grub> @kbd{increment counter 5}
+grub> @kbd{echo $@{counter@}}
+6
+grub> @kbd{increment --hex --pad=8 counter 3}
+grub> @kbd{echo $@{counter@}}
+0x00000009
+grub> @kbd{increment counter 2}
+grub> @kbd{echo $@{counter@}}
+11
+grub>
+@end example
 
 @end deffn
 
