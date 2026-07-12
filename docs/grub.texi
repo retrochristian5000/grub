@@ -7244,7 +7244,10 @@ afterwards to trigger the boot immediately.
 Perform simple mathematical calculations and bitwise operations. If option
 @option{--set} is given, store result in variable @var{var}. Unless
 @var{number_system} is specified, the result will be represented using the
-decimal number system.
+decimal number system. If option @option{--pad} is given, the result is
+padded with zeros until the result is @var{LENGTH} characters long. If
+option @option{--ops} is given, a list of supported operations is displayed
+and no calculations are performed.
 
 The parser will interpret negative numeric values as command line options
 unless a double hypehn ("---") is provided after the last option. For example:
