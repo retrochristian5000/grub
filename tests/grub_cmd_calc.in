@@ -44,3 +44,23 @@ if test "$v" != 0; then echo "error: $cmd" >&2; exit 1; fi
 cmd='calc -s result 12 pow 5; echo $result'
 v=`echo "$cmd" | @builddir@/grub-shell`
 if test "$v" != 248832; then echo "error: $cmd" >&2; exit 1; fi
+
+cmd='calc 12 div 0; echo $?'
+v=`echo "$cmd" | @builddir@/grub-shell 2> /dev/null |tail -1`
+if test "x$v" == "x0"; then echo "error: $cmd" >&2; exit 1; fi
+
+cmd='calc 0 pow 0; echo $?'
+v=`echo "$cmd" | @builddir@/grub-shell 2> /dev/null |tail -1`
+if test "x$v" == "x0"; then echo "error: $cmd" >&2; exit 1; fi
+
+cmd='calc 0x01m; echo $?'
+v=`echo "$cmd" | @builddir@/grub-shell 2> /dev/null |tail -1`
+if test "x$v" == "x0"; then echo "error: $cmd" >&2; exit 1; fi
+
+cmd='calc 081; echo $?'
+v=`echo "$cmd" | @builddir@/grub-shell 2> /dev/null |tail -1`
+if test "x$v" == "x0"; then echo "error: $cmd" >&2; exit 1; fi
+
+cmd='calc 0b02; echo $?'
+v=`echo "$cmd" | @builddir@/grub-shell 2> /dev/null |tail -1`
+if test "x$v" == "x0"; then echo "error: $cmd" >&2; exit 1; fi
