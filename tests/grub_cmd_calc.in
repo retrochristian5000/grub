@@ -17,6 +17,8 @@ set -ex
 # You should have received a copy of the GNU General Public License
 # along with GRUB.  If not, see <http://www.gnu.org/licenses/>.
 
+# tests for calc command
+
 cmd='calc -s result 907 add 980 mod 1151; echo $result'
 v=`echo "$cmd" | @builddir@/grub-shell`
 if test "$v" != 736; then echo "error: $cmd" >&2; exit 1; fi
@@ -64,3 +66,17 @@ if test "x$v" == "x0"; then echo "error: $cmd" >&2; exit 1; fi
 cmd='calc 0b02; echo $?'
 v=`echo "$cmd" | @builddir@/grub-shell 2> /dev/null |tail -1`
 if test "x$v" == "x0"; then echo "error: $cmd" >&2; exit 1; fi
+
+# tests for increment command
+
+cmd='set num=2; export num; increment num; echo $num'
+v=`echo "$cmd" | @builddir@/grub-shell`
+if test "$v" != 3; then echo "error: $cmd" >&2; exit 1; fi
+
+cmd='set num=2; export num; increment num 5; echo $num'
+v=`echo "$cmd" | @builddir@/grub-shell`
+if test "$v" != 7; then echo "error: $cmd" >&2; exit 1; fi
+
+cmd='set num=2; export num; increment -- num -1; echo $num'
+v=`echo "$cmd" | @builddir@/grub-shell`
+if test "$v" != 1; then echo "error: $cmd" >&2; exit 1; fi
