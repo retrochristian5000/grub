@@ -80,3 +80,21 @@ if test "$v" != 7; then echo "error: $cmd" >&2; exit 1; fi
 cmd='set num=2; export num; increment -- num -1; echo $num'
 v=`echo "$cmd" | @builddir@/grub-shell`
 if test "$v" != 1; then echo "error: $cmd" >&2; exit 1; fi
+
+cmd='increment -- num; echo $?'
+v=`echo "$cmd" | @builddir@/grub-shell 2> /dev/null |tail -1`
+if test "$v" == 0; then echo "error: $cmd" >&2; exit 1; fi
+
+# tests for decrement command
+
+cmd='set num=2; export num; decrement num; echo $num'
+v=`echo "$cmd" | @builddir@/grub-shell`
+if test "$v" != 1; then echo "error: $cmd" >&2; exit 1; fi
+
+cmd='set num=2; export num; decrement num 2; echo $num'
+v=`echo "$cmd" | @builddir@/grub-shell`
+if test "$v" != 0; then echo "error: $cmd" >&2; exit 1; fi
+
+cmd='decrement num; echo $?'
+v=`echo "$cmd" | @builddir@/grub-shell 2> /dev/null |tail -1`
+if test "$v" == 0; then echo "error: $cmd" >&2; exit 1; fi
