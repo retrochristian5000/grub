@@ -4154,6 +4154,7 @@ Modules can be loaded via the @command{insmod} (@pxref{insmod}) command.
 * btrfs_module::
 * bufio_module::
 * cacheinfo_module::
+* calc_module::
 * cat_module::
 * cbfs_module::
 * cbls_module::
@@ -4616,6 +4617,13 @@ file reads performed in other modules.
 This module provides support for the command @command{cacheinfo} which provides
 statistics on disk cache accesses. This module is only built if
 @code{DISK_CACHE_STATS} is enabled.
+
+@node calc_module
+@section calc
+This module provides support for the @command{calc}, @command{decrement},
+and @command{increment} commands which perform simple mathematical calculations
+and bitwise operations.  @xref{calc}, @xref{decrement}, and @xref{increment}
+for more information.
 
 @node cat_module
 @section cat
@@ -6812,6 +6820,7 @@ you forget a command, you can run the command @command{help}
 * blscfg::                      Load Boot Loader Specification menu entries
 * boot::                        Start up your operating system
 * bootnext::                    Set EFI BootNext variable
+* calc::                        Perform mathematical and bitwise operations
 * cat::                         Show the contents of a file
 * clear::                       Clear the screen
 * cmosclean::                   Clear bit in CMOS
@@ -6825,6 +6834,7 @@ you forget a command, you can run the command @command{help}
 * cryptomount::                 Mount a crypto device
 * cutmem::                      Remove memory regions
 * date::                        Display or set current date and time
+* decrement::                   Decrement numeric value of variable
 * devicetree::                  Load a device tree blob
 * distrust::                    Remove a pubkey from trusted keys
 * drivemap::                    Map a drive to another
@@ -6845,6 +6855,7 @@ you forget a command, you can run the command @command{help}
 * hashsum::                     Compute or check hash checksum
 * help::                        Show help messages
 * hexdump::                     Show raw contents of a file or memory
+* increment::                   Increment numeric value of variable
 * insmod::                      Insert a module
 * keystatus::                   Check key modifier status
 * list_env::                    List variables in environment block
@@ -7246,6 +7257,107 @@ BootNext set to Boot0002: UEFI QEMU DVD-ROM QM00003
 @end deffn
 
 
+@node calc                    
+@subsection calc
+
+@deffn Command calc [@option{--set} var] [number_system] number [expression [... [expression]]]
+Perform simple mathematical calculations and bitwise operations. If option
+@option{--set} is given, store result in variable @var{var}. Unless
+@var{number_system} is specified, the result will be represented using the
+decimal number system. If option @option{--pad} is given, the result is
+padded with zeros until the result is @var{LENGTH} characters long. If
+option @option{--ops} is given, a list of supported operations is displayed
+and no calculations are performed.
+
+The parser will interpret negative numeric values as command line options
+unless a double hypehn ("---") is provided after the last option. For example:
+
+@example
+grub> @kbd{calc --hex -42 pow 4}
+error: ../../grub-core/lib/arg.c:grub_arg_parse:291:unknown argument `-4'.
+grub> @kbd{calc --hex -- -42 pow 4}
+0x2f7b10
+grub> @kbd{calc -- -42 pow 4}
+3111696
+@end example
+
+@var{number_system} may be one of the following options:
+@itemize @bullet
+@item
+@option{--binary} Represent result using binary number system
+@item
+@option{--octal} Represent result using octal number system
+@item
+@option{--decimal} Represent result using decimal number system
+@item
+@option{--hex} Represent result using dhexadecimal number system
+@end itemize
+
+@var{expression} may be one of the following:
+@itemize @bullet
+@item
+@var{add} @var{NUMBER} - addition
+@item
+@var{sub} @var{NUMBER} - subtraction
+@item
+@var{div} @var{NUMBER} - integer division
+@item
+@var{mod} @var{NUMBER} - modulo operation
+@item
+@var{mul} @var{NUMBER} - multiplication
+@item
+@var{pow} @var{NUMBER} - exponentiation
+@item
+@var{and} @var{NUMBER} - bitwise AND operation
+@item
+@var{or} @var{NUMBER} - bitwise inclusive OR operation
+@item
+@var{xor} @var{NUMBER} - bitwise exclusive OR operation
+@item
+@var{not} - bitwise NOT operation
+@item
+@var{lsh} @var{NUMBER} - bitwise left shift operation
+@item
+@var{rsh} @var{NUMBER} - bitwise right shift operation
+@item
+@var{lshift} @var{NUMBER} - same as @var{lsh}
+@item
+@var{rshift} @var{NUMBER} - same as @var{rsh}
+@end itemize
+
+Example expressions:
+@example
+grub> @kbd{calc 1 add 3}
+4
+grub> @kbd{calc 7 div 2}
+3
+grub> @kbd{calc 5 mod 2}
+1
+grub> @kbd{calc -- 14 div -3}
+-4
+grub> @kbd{calc 907 add 980 mod 1151}
+736
+grub> @kbd{calc --set calc_result --hex 2 add 1 mul 4}
+grub> @kbd{echo $@b{@{}calc_result@b{@}}}
+0xc
+grub>
+@end example
+
+Examples of number conversions:
+@example
+grub> @kbd{calc --octal 0b1010101}
+0125
+grub> @kbd{calc --decimal 0125}
+85
+grub> @kbd{calc --hex 85}
+0x55
+grub> @kbd{calc --binary 0x55}
+0b1010101
+grub>
+@end example
+@end deffn
+
+
 @node cat
 @subsection cat
 
@@ -7456,6 +7568,51 @@ Otherwise, take the current date and time, change any elements specified as
 arguments, and set the result as the new date and time.  For example, `date
 01-01' will set the current month and day to January 1, but leave the year,
 hour, minute, and second unchanged.
+@end deffn
+
+
+@node decrement
+@subsection decrement
+
+@deffn Command decrement [@option{--verbose}] [@option{--pad=LENGTH}] [number_system] VARNAME [NUMBER]
+Decrement the numeric value of @var{VARNAME} by 1.  If @var{NUMBER} is
+specifiied, decrement the numeric value of @var{VARNAME} by @var{NUMBER}.
+Save the result to @var{VARNAME}.  If @var{number_system} is specified,
+format the result using the specified number system.  If @option{--verbose}
+is given, the result will also be displayed to the console. The @option{--pad=LENGTH}
+option specifies that the result should be represented using at least @var{LENGTH}
+digits.
+
+@var{number_system} may be one of the following options:
+@itemize @bullet
+@item
+@option{--binary} Represent result using binary number system
+@item
+@option{--octal} Represent result using octal number system
+@item
+@option{--decimal} Represent result using decimal number system
+@item
+@option{--hex} Represent result using dhexadecimal number system
+@end itemize
+
+Example usage:
+@example
+grub> @kbd{counter=11}
+grub> @kbd{decrement counter 2}
+grub> @kbd{echo $@{counter@}}
+9
+grub> @kbd{decrement --hex --pad=8 counter 3}
+grub> @kbd{echo $@{counter@}}
+0x00000006
+grub> @kbd{decrement counter 5}
+grub> @kbd{echo $@{counter@}}
+1
+grub> @kbd{decrement counter}
+grub> @kbd{echo $@{counter@}  }
+0
+grub>
+@end example
+
 @end deffn
 
 
@@ -7889,6 +8046,52 @@ If given the special device named @samp{(mem)}, then the @samp{offset} given to
 Note: The dumping of RAM memory (by the (mem) argument) is not allowed when
 when lockdown is enforced (@pxref{Lockdown}). The dumping of disk or file
 data is allowed when lockdown is enforced.
+
+@end deffn
+
+
+@node increment                 
+@subsection increment
+
+@deffn Command increment [@option{--verbose}] [@option{--pad=LENGTH}] [number_system] VARNAME [NUMBER]
+Increment the numeric value of @var{VARNAME} by 1.  If @var{NUMBER} is
+specifiied, increment the numeric value of @var{VARNAME} by @var{NUMBER}.
+The result is saved to @var{VARNAME}.  If @var{number_system} is specified,
+format the result using the specified number system.  If @option{--verbose}
+is given, the result will also be displayed to the console. The @option{--pad=LENGTH}
+option specifies that the result should be represented using at least @var{LENGTH}
+digits.
+
+@var{number_system} may be one of the following options:
+@itemize @bullet
+@item
+@option{--binary} Represent result using binary number system
+@item
+@option{--octal} Represent result using octal number system
+@item
+@option{--decimal} Represent result using decimal number system
+@item
+@option{--hex} Represent result using dhexadecimal number system
+@end itemize
+
+Example usage:
+@example
+grub> @kbd{counter=0}
+grub> @kbd{export counter}
+grub> @kbd{increment counter}
+grub> @kbd{echo $@{counter@}}
+1
+grub> @kbd{increment counter 5}
+grub> @kbd{echo $@{counter@}}
+6
+grub> @kbd{increment --hex --pad=8 counter 3}
+grub> @kbd{echo $@{counter@}}
+0x00000009
+grub> @kbd{increment counter 2}
+grub> @kbd{echo $@{counter@}}
+11
+grub>
+@end example
 
 @end deffn
 

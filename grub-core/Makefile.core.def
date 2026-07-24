@@ -797,6 +797,13 @@ module = {
 };
 
 module = {
+  name = calc;
+  common = commands/calc.c;
+  cflags = '$(CFLAGS_POSIX) $(CFLAGS_GNULIB)';
+  cppflags = '$(CPPFLAGS_POSIX) $(CPPFLAGS_GNULIB)';
+};
+
+module = {
   name = acpi;
 
   common = commands/acpi.c;

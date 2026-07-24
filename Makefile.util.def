@@ -1206,6 +1206,12 @@ script = {
 
 script = {
   testcase = nonnative;
+  name = grub_cmd_calc;
+  common = tests/grub_cmd_calc.in;
+};
+
+script = {
+  testcase = nonnative;
   name = grub_cmd_regexp;
   common = tests/grub_cmd_regexp.in;
 };
