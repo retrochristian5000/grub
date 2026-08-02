@@ -176,12 +176,20 @@ add_bootnext_entry (grub_uint16_t num, const struct bootmenu_opts *o)
   if (title != NULL && id != NULL && src != NULL)
     {
       const char *argv[1];
-      char *classes[3];
+      char *classes[4];
+      int n = 0;
 
       argv[0] = title;
-      classes[0] = (class_main != NULL) ? class_main : (char *) "efi";
-      classes[1] = (char *) "os";
-      classes[2] = NULL;
+      /*
+       * The derived class comes first so a theme's OS icon is preferred,
+       * with efi as the base class every entry carries: icon lookup walks
+       * the classes in order and uses the first one with an icon.
+       */
+      if (class_main != NULL && grub_strcmp (class_main, "efi") != 0)
+        classes[n++] = class_main;
+      classes[n++] = (char *) "efi";
+      classes[n++] = (char *) "os";
+      classes[n] = NULL;
 
       /*
        * users "" restricts the entry to superusers whenever authentication

@@ -190,6 +190,10 @@ fi
 # rejection) do not update grubenv.  Cf. 30_os-prober.in:204.
 SAVEDEFAULT="`save_default_entry`"
 
+# The classes every entry carries.  A class derived from the entry label is
+# prepended to these below.  Cf. 10_linux.in:28
+BASE_CLASS="--class efi --class os"
+
 printf '%s\n' "${EFI_OUTPUT}" | \
     sed -n "s/^Boot\([0-9A-Fa-f]\{4\}\)${ACTIVE_PAT} *\([^${TAB}]*\)${TAB}\{0,1\}\(.*\)/\1${TAB}\2${TAB}\3/p" | \
 while IFS="${TAB}" read -r bootnum label devpath; do
@@ -258,15 +262,20 @@ while IFS="${TAB}" read -r bootnum label devpath; do
     # with trailing digits and non-alnum stripped.
     # e.g. "Windows Boot Manager" -> "windows"
     # Cf. 30_os-prober.in:156
-    CLASS="`printf '%s\n' "${label}" | cut -d' ' -f1 | tr 'A-Z' 'a-z' | \
+    # It precedes the base classes: themes pick the first class with an
+    # icon, so an OS icon wins when the theme has one and efi is the
+    # fallback.
+    class_main="`printf '%s\n' "${label}" | cut -d' ' -f1 | tr 'A-Z' 'a-z' | \
         LC_ALL=C sed 's,[[:digit:]]*$,,' | LC_ALL=C sed 's,[^[:alnum:]_],_,g'`"
-    [ -z "${CLASS}" ] && CLASS="efi"
-    CLASS="--class ${CLASS}"
+    CLASS="${BASE_CLASS}"
+    if [ -n "${class_main}" ] && [ "${class_main}" != "efi" ]; then
+        CLASS="--class ${class_main} ${CLASS}"
+    fi
 
     # Cf. 30_uefi-firmware.in:34
     cat << EOF
 if [ "\$grub_platform" = "efi" ]; then
-  menuentry '$(gettext_printf "%s (EFI BootNext)" "${label}" | grub_quote)' $CLASS --class os \$menuentry_id_option 'efi-bootnext-${bootnum}' {
+  menuentry '$(gettext_printf "%s (EFI BootNext)" "${label}" | grub_quote)' ${CLASS} \$menuentry_id_option 'efi-bootnext-${bootnum}' {
     if bootnext ${bootnum}; then
       ${SAVEDEFAULT}
       reboot
