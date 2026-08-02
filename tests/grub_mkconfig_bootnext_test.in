@@ -145,12 +145,23 @@ if ! grep -q 'efibootmenu --omit-inactive --savedefault --category-boot-only' "$
     exit 1
 fi
 
+# 5. Submenu knob wraps the command in a submenu block (and proves the
+#    variable is exported to the helper).
+run_mkconfig 'GRUB_BOOTNEXT_DISCOVER_AT_BOOT=true
+GRUB_BOOTNEXT_SUBMENU=true'
+if ! grep -q "submenu .*efi-bootnext-submenu" "$tmp/cfg" || \
+   ! grep -Eq '^[[:space:]]+efibootmenu[[:space:]]*$' "$tmp/cfg"; then
+    echo "FAIL: GRUB_BOOTNEXT_SUBMENU=true did not wrap efibootmenu in a submenu" >&2
+    cat "$tmp/cfg" >&2
+    exit 1
+fi
+
 # --- config-time path -------------------------------------------------------
 # 31_efi_bootnext bails early on hosts without /sys/firmware/efi, which would
 # stop before efibootmgr and mask a missing GRUB_DISABLE_BOOTNEXT export.  So
 # only exercise this where the disable check is actually reached.
 if [ -d /sys/firmware/efi ]; then
-    # 5. GRUB_DISABLE_BOOTNEXT must stop the config-time path before
+    # 6. GRUB_DISABLE_BOOTNEXT must stop the config-time path before
     #    efibootmgr.  If it propagates, the helper exits at its first check
     #    and the sentinel never appears; without the export it falls through
     #    and trips the stub.

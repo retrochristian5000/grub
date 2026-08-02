@@ -1612,6 +1612,18 @@ If set to @samp{true} together with @samp{GRUB_BOOTNEXT_DISCOVER_AT_BOOT},
 @command{efibootmenu} skips EFI boot manager entries whose load option
 category is not the boot category (e.g. firmware applications).
 
+@item GRUB_BOOTNEXT_SUBMENU
+If set to @samp{true}, the EFI BootNext entries are grouped into a
+@samp{UEFI boot entries} submenu instead of appearing in the top-level
+menu.  This applies to both discovery modes: the config-time path wraps
+its generated entries in a @command{submenu} block, while the runtime
+path places the @command{efibootmenu} command inside one, so the boot
+options are then discovered when the submenu is entered.  The entry
+identifiers gain the submenu prefix
+(@samp{efi-bootnext-submenu>efi-bootnext-XXXX}), which matters when one
+is named explicitly in @samp{GRUB_DEFAULT}; @samp{GRUB_SAVEDEFAULT}
+records the prefixed form automatically.
+
 @item GRUB_DISABLE_SUBMENU
 Normally, @command{grub-mkconfig} will generate top level menu entry for
 the kernel with highest version number and put all other found kernels
