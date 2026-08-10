@@ -435,6 +435,7 @@ grub_ext4_find_leaf (struct grub_ext2_data *data,
     {
       int i;
       grub_disk_addr_t block;
+      grub_uint16_t nidx;
 
       index = (struct grub_ext4_extent_idx *) (ext_block + 1);
 
@@ -447,7 +448,22 @@ grub_ext4_find_leaf (struct grub_ext2_data *data,
           return GRUB_ERR_NONE;
         }
 
-      for (i = 0; i < grub_le_to_cpu16 (ext_block->entries); i++)
+      /*
+       * Clamp the on-disk entry count to the number of extent-index entries
+       * that actually fit in the buffer index[] points into, mirroring the
+       * leaf-array clamp in grub_ext2_read_block().  The first iteration
+       * walks the inline extent area inside the inode (buf == NULL); later
+       * iterations walk an external extent block of EXT2_BLOCK_SIZE bytes.
+       * Without this, the attacker-controlled ext_block->entries drives the
+       * loop past the buffer (out-of-bounds read).
+       */
+      if (buf == NULL)
+	nidx = sizeof (((struct grub_ext2_inode *) 0)->blocks) / sizeof (*index) - 1;
+      else
+	nidx = EXT2_BLOCK_SIZE (data) / sizeof (*index) - 1;
+      nidx = grub_min (grub_le_to_cpu16 (ext_block->entries), nidx);
+
+      for (i = 0; i < nidx; i++)
         {
           if (fileblock < grub_le_to_cpu32(index[i].block))
             break;
