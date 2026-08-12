@@ -19,8 +19,10 @@
 #include <grub/net.h>
 #include <grub/net/udp.h>
 #include <grub/command.h>
+#include <grub/extcmd.h>
 #include <grub/i18n.h>
 #include <grub/err.h>
+#include <grub/env.h>
 #include <grub/time.h>
 #include <grub/safemath.h>
 
@@ -44,6 +46,21 @@ typedef enum grub_dns_qtype_id
 static struct dns_cache_element dns_cache[DNS_CACHE_SIZE];
 static struct grub_net_network_level_address *dns_servers;
 static grub_size_t dns_nservers, dns_servers_alloc;
+
+static const struct grub_arg_option options_del[] =
+{
+  { "all", 'a', 0, N_("Delete all DNS servers."), 0, 0 },
+  { 0, 0, 0, 0, 0, 0 }
+};
+
+static const struct grub_arg_option options_ls[] =
+{
+  { "set", 's', GRUB_ARG_OPTION_REPEATABLE,
+    N_("Set DNS servers NUMBER in VARNAME."),
+    N_("[NUMBER:]VARNAME"), ARG_TYPE_STRING },
+  { "quiet", 'q', 0, N_("Do not print output."), 0, 0 },
+  { 0, 0, 0, 0, 0, 0 }
+};
 
 grub_err_t
 grub_net_add_dns_server (const struct grub_net_network_level_address *s)
@@ -676,38 +693,107 @@ grub_cmd_nslookup (struct grub_command *cmd __attribute__ ((unused)),
 }
 
 static grub_err_t
-grub_cmd_list_dns (struct grub_command *cmd __attribute__ ((unused)),
+grub_cmd_list_dns_str (char *str, grub_size_t size,
+		       struct grub_net_network_level_address *dns_server)
+{
+  char buf[GRUB_NET_MAX_STR_ADDR_LEN];
+  const char *strtype = "";
+
+  switch (dns_server->option)
+    {
+    case DNS_OPTION_IPV4:
+      strtype = _("only ipv4");
+      break;
+
+    case DNS_OPTION_IPV6:
+      strtype = _("only ipv6");
+      break;
+
+    case DNS_OPTION_PREFER_IPV4:
+      strtype = _("prefer ipv4");
+      break;
+
+    case DNS_OPTION_PREFER_IPV6:
+      strtype = _("prefer ipv6");
+      break;
+    }
+
+  grub_net_addr_to_str (dns_server, buf);
+  grub_snprintf (str, size, "%s (%s)", buf, strtype);
+
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
+grub_cmd_list_dns_setvars (char **varnames)
+{
+  int i;
+  char *p;
+  grub_err_t err;
+  unsigned long j;
+  const char * q;
+  char buf[GRUB_NET_MAX_STR_ADDR_LEN+24];
+
+  for (i = 0; varnames && varnames[i]; i++)
+    {
+      err = GRUB_ERR_NONE;
+      p = grub_strchr (varnames[i], ':');
+      if (! p)
+        {
+          /* varname w/o index defaults to first server */
+          if (dns_nservers == 0)
+            grub_env_unset (varnames[i]);
+          else
+            {
+              grub_cmd_list_dns_str(buf, sizeof(buf), &dns_servers[0]);
+              err = grub_env_set (varnames[i], buf);
+            }
+        }
+      else
+        {
+          j = grub_strtoul (varnames[i], &q, 10);
+          if (q != p)
+            return grub_error (GRUB_ERR_BAD_ARGUMENT,
+                               "invalid variable name format %s", varnames[i]);
+          if ((unsigned long)dns_nservers <= j)
+            grub_env_unset (p + 1);
+          else
+            {
+              grub_cmd_list_dns_str(buf, sizeof(buf), &dns_servers[j]);
+              err = grub_env_set (p + 1, buf);
+            }
+        }
+      if (err != GRUB_ERR_NONE)
+        return err;
+    }
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
+grub_cmd_list_dns (grub_extcmd_context_t ctxt,
 		   int argc __attribute__ ((unused)),
 		   char **args __attribute__ ((unused)))
 {
   grub_size_t i;
-  const char *strtype = "";
+  char buf[GRUB_NET_MAX_STR_ADDR_LEN+24];
+  grub_err_t err;
 
-  for (i = 0; i < dns_nservers; i++)
+  if (ctxt->state[0].set != 0)
     {
-      switch (dns_servers[i].option)
-        {
-        case DNS_OPTION_IPV4:
-          strtype = _("only ipv4");
-          break;
-
-        case DNS_OPTION_IPV6:
-          strtype = _("only ipv6");
-          break;
-
-        case DNS_OPTION_PREFER_IPV4:
-          strtype = _("prefer ipv4");
-          break;
-
-        case DNS_OPTION_PREFER_IPV6:
-          strtype = _("prefer ipv6");
-          break;
-        }
-
-      char buf[GRUB_NET_MAX_STR_ADDR_LEN];
-      grub_net_addr_to_str (&dns_servers[i], buf);
-      grub_printf ("%s (%s)\n", buf, strtype);
+      err = grub_cmd_list_dns_setvars(ctxt->state[0].args);
+      if (err != GRUB_ERR_NONE)
+        return err;
     }
+
+  if (ctxt->state[1].set == 0)
+    {
+      for (i = 0; i < dns_nservers; i++)
+        {
+          grub_cmd_list_dns_str(buf, sizeof(buf), &dns_servers[i]);
+          grub_printf ("%s\n", buf);
+        }
+    }
+
   return GRUB_ERR_NONE;
 }
 
@@ -744,11 +830,18 @@ grub_cmd_add_dns (struct grub_command *cmd __attribute__ ((unused)),
 }
 
 static grub_err_t
-grub_cmd_del_dns (struct grub_command *cmd __attribute__ ((unused)),
+grub_cmd_del_dns (grub_extcmd_context_t ctxt,
 		  int argc, char **args)
 {
   grub_err_t err;
   struct grub_net_network_level_address server;
+
+  if (ctxt->state[0].set != 0)
+    {
+      while (dns_nservers > 0)
+        grub_net_remove_dns_server (&dns_servers[0]);
+      return GRUB_ERR_NONE;
+    }
 
   if (argc != 1)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("one argument expected"));
@@ -762,7 +855,8 @@ grub_cmd_del_dns (struct grub_command *cmd __attribute__ ((unused)),
   return GRUB_ERR_NONE;
 }
 
-static grub_command_t cmd, cmd_add, cmd_del, cmd_list;
+static grub_command_t cmd, cmd_add;
+static grub_extcmd_t cmd_del, cmd_list;
 
 void
 grub_dns_init (void)
@@ -773,11 +867,14 @@ grub_dns_init (void)
   cmd_add = grub_register_command ("net_add_dns", grub_cmd_add_dns,
 				   N_("DNSSERVER"),
 				   N_("Add a DNS server"));
-  cmd_del = grub_register_command ("net_del_dns", grub_cmd_del_dns,
-				   N_("DNSSERVER"),
-				   N_("Remove a DNS server"));
-  cmd_list = grub_register_command ("net_ls_dns", grub_cmd_list_dns,
-				   NULL, N_("List DNS servers"));
+  cmd_del = grub_register_extcmd ("net_del_dns", grub_cmd_del_dns, 0,
+				   N_("[--all | DNSSERVER]"),
+				   N_("Remove a DNS server"),
+                                   options_del);
+  cmd_list = grub_register_extcmd ("net_ls_dns", grub_cmd_list_dns, 0,
+				   N_("[--set=[NUMBER:]VARNAME]"),
+				   N_("List DNS servers"),
+                                   options_ls);
 }
 
 void
@@ -785,6 +882,6 @@ grub_dns_fini (void)
 {
   grub_unregister_command (cmd);
   grub_unregister_command (cmd_add);
-  grub_unregister_command (cmd_del);
-  grub_unregister_command (cmd_list);
+  grub_unregister_extcmd (cmd_del);
+  grub_unregister_extcmd (cmd_list);
 }

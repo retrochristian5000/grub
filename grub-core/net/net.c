@@ -25,6 +25,7 @@
 #include <grub/misc.h>
 #include <grub/dl.h>
 #include <grub/command.h>
+#include <grub/extcmd.h>
 #include <grub/env.h>
 #include <grub/net/ethernet.h>
 #include <grub/net/arp.h>
@@ -51,6 +52,36 @@ struct grub_net_link_layer_entry {
 };
 
 #define LINK_LAYER_CACHE_SIZE 256
+
+static const struct grub_arg_option options_deladdr[] =
+{
+  { "all", 'a', 0, N_("delete all addresses."), 0, 0 },
+  { 0, 0, 0, 0, 0, 0 }
+};
+
+static const struct grub_arg_option options_delroute[] =
+{
+  { "all", 'a', 0, N_("delete all routes."), 0, 0 },
+  { 0, 0, 0, 0, 0, 0 }
+};
+
+static const struct grub_arg_option options_lsaddr[] =
+{
+  { "set", 's', GRUB_ARG_OPTION_REPEATABLE,
+    N_("Set address NUMBER in VARNAME."),
+    N_("[NUMBER:]VARNAME"), ARG_TYPE_STRING },
+  { "quiet", 'q', 0, N_("Do not print output."), 0, 0 },
+  { 0, 0, 0, 0, 0, 0 }
+};
+
+static const struct grub_arg_option options_lscards[] =
+{
+  { "set", 's', GRUB_ARG_OPTION_REPEATABLE,
+    N_("Set network card NUMBER in VARNAME."),
+    N_("[NUMBER:]VARNAME"), ARG_TYPE_STRING },
+  { "quiet", 'q', 0, N_("Do not print output."), 0, 0 },
+  { 0, 0, 0, 0, 0, 0 }
+};
 
 static struct grub_net_link_layer_entry *
 link_layer_find_entry (const grub_net_network_level_address_t *proto,
@@ -720,10 +751,33 @@ grub_net_route_address (grub_net_network_level_address_t addr,
 }
 
 static grub_err_t
-grub_cmd_deladdr (struct grub_command *cmd __attribute__ ((unused)),
-		  int argc, char **args)
+grub_cmd_deladdr (grub_extcmd_context_t ctxt, int argc, char **args)
 {
   struct grub_net_network_level_interface *inter;
+  struct grub_net_network_level_interface *next_inter;
+
+  /* delete all addresses if requested */
+  if (ctxt->state[0].set != 0)
+    {
+      if (argc != 0)
+        return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("cannot specify argument with --all"));
+      inter = grub_net_network_level_interfaces;
+      while ( inter )
+        {
+          next_inter = inter->next;
+          if (inter->flags & GRUB_NET_INTERFACE_PERMANENT)
+            {
+              grub_printf (N_("unable to delete address %s\n"), inter->name);
+              inter = next_inter;
+              continue;
+            }
+          grub_net_network_level_interface_unregister (inter);
+          grub_free (inter->name);
+          grub_free (inter);
+          inter = next_inter;
+        }
+      return GRUB_ERR_NONE;
+    }
 
   if (argc != 1)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("one argument expected"));
@@ -1191,11 +1245,28 @@ grub_cmd_addaddr (struct grub_command *cmd __attribute__ ((unused)),
 }
 
 static grub_err_t
-grub_cmd_delroute (struct grub_command *cmd __attribute__ ((unused)),
-		   int argc, char **args)
+grub_cmd_delroute (grub_extcmd_context_t ctxt, int argc, char **args)
 {
   struct grub_net_route *route;
+  struct grub_net_route *route_next;
   struct grub_net_route **prev;
+
+  /* delete all routes if requested */
+  if (ctxt->state[0].set != 0)
+    {
+      if (argc != 0)
+        return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("cannot specify argument with --all"));
+      route = grub_net_routes;
+      while ( route )
+        {
+          route_next = route->next;
+          grub_free (route->name); 
+          grub_free (route);
+          route = route_next;
+        }
+      grub_net_routes = NULL;
+      return GRUB_ERR_NONE;
+    }
 
   if (argc != 1)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("one argument expected"));
@@ -1406,37 +1477,140 @@ grub_cmd_listroutes (struct grub_command *cmd __attribute__ ((unused)),
 }
 
 static grub_err_t
-grub_cmd_listcards (struct grub_command *cmd __attribute__ ((unused)),
+grub_cmd_listcards (grub_extcmd_context_t ctxt,
 		    int argc __attribute__ ((unused)),
 		    char **args __attribute__ ((unused)))
 {
+  int      i;
   struct grub_net_card *card;
-  FOR_NET_CARDS(card)
-  {
-    char buf[GRUB_NET_MAX_STR_HWADDR_LEN];
-    grub_net_hwaddr_to_str (&card->default_address, buf);
-    grub_printf ("%s %s\n", card->name, buf);
-  }
+  char hwaddrstr[GRUB_NET_MAX_STR_HWADDR_LEN];
+  char buf[GRUB_NET_MAX_STR_HWADDR_LEN+sizeof("18446744073709551615")];
+  unsigned long j;
+  grub_err_t err;
+  char *varname;
+  char **varnames;
+  char *p;
+  const char * q;
+
+  if (ctxt->state[0].set != 0)
+    {
+      err = GRUB_ERR_NONE;
+      varnames = ctxt->state[0].args;
+      for (i = 0; varnames && varnames[i]; i++)
+        {
+          err = GRUB_ERR_NONE;
+          p = grub_strchr (varnames[i], ':');
+          if (! p)
+            {
+              /* varname w/o index defaults to first server */
+              varname = varnames[i];
+              card = grub_net_cards;
+            }
+          else
+            {
+              j = grub_strtoul (varnames[i], &q, 10);
+              if (q != p)
+                return grub_error (GRUB_ERR_BAD_ARGUMENT,
+                                   "invalid variable name format %s",
+                                    varnames[i]);
+              for(card = grub_net_cards; (card && (j > 0)); card = card->next)
+                j--;
+              varname = p + 1;
+            }
+          if (card == NULL)
+            grub_env_unset (varname);
+          else
+            {
+              grub_net_hwaddr_to_str (&card->default_address, hwaddrstr);
+              grub_snprintf(buf, sizeof (buf), "%s %s", card->name, hwaddrstr);
+              err = grub_env_set (varname, buf);
+            }
+          if (err != GRUB_ERR_NONE)
+            return err;
+        }
+    }
+
+  if (ctxt->state[1].set == 0)
+    {
+      FOR_NET_CARDS(card)
+        {
+          grub_net_hwaddr_to_str (&card->default_address, hwaddrstr);
+          grub_printf ("%s %s\n", card->name, hwaddrstr);
+        }
+    }
+
   return GRUB_ERR_NONE;
 }
 
 static grub_err_t
-grub_cmd_listaddrs (struct grub_command *cmd __attribute__ ((unused)),
+grub_cmd_listaddrs (grub_extcmd_context_t ctxt,
 		    int argc __attribute__ ((unused)),
 		    char **args __attribute__ ((unused)))
 {
+  int i;
+  unsigned long j;
+  grub_err_t err;
+  char *varname;
+  char **varnames;
+  char *p;
+  const char * q;
   struct grub_net_network_level_interface *inf;
-  FOR_NET_NETWORK_LEVEL_INTERFACES (inf)
-  {
-    char bufh[GRUB_NET_MAX_STR_HWADDR_LEN];
-    char bufn[GRUB_NET_MAX_STR_ADDR_LEN];
-    char bufv[GRUB_NET_MAX_STR_VLAN_LEN];
+  char buf[GRUB_NET_MAX_STR_HWADDR_LEN+GRUB_NET_MAX_STR_ADDR_LEN+GRUB_NET_MAX_STR_VLAN_LEN+sizeof("18446744073709551615")];
+  char bufh[GRUB_NET_MAX_STR_HWADDR_LEN];
+  char bufn[GRUB_NET_MAX_STR_ADDR_LEN];
+  char bufv[GRUB_NET_MAX_STR_VLAN_LEN];
 
-    grub_net_hwaddr_to_str (&inf->hwaddress, bufh);
-    grub_net_addr_to_str (&inf->address, bufn);
-    grub_net_vlan_to_str (inf->vlantag, bufv);
-    grub_printf ("%s %s %s %s\n", inf->name, bufh, bufn, bufv);
-  }
+  if (ctxt->state[0].set != 0)
+    {
+      err = GRUB_ERR_NONE;
+      varnames = ctxt->state[0].args;
+      for (i = 0; varnames && varnames[i]; i++)
+        {
+          err = GRUB_ERR_NONE;
+          p = grub_strchr (varnames[i], ':');
+          if (! p)
+            {
+              /* varname w/o index defaults to first server */
+              varname = varnames[i];
+              inf = grub_net_network_level_interfaces;
+            }
+          else
+            {
+              j = grub_strtoul (varnames[i], &q, 10);
+              if (q != p)
+                return grub_error (GRUB_ERR_BAD_ARGUMENT,
+                                   "invalid variable name format %s",
+                                    varnames[i]);
+              for(inf = grub_net_network_level_interfaces; (inf && (j > 0)); inf = inf->next)
+                j--;
+              varname = p + 1;
+            }
+          if (inf == NULL)
+            grub_env_unset (varname);
+          else
+            {
+              grub_net_hwaddr_to_str (&inf->hwaddress, bufh);
+              grub_net_addr_to_str (&inf->address, bufn);
+              grub_net_vlan_to_str (inf->vlantag, bufv);
+              grub_snprintf (buf, sizeof(buf), "%s %s %s %s", inf->name, bufh, bufn, bufv);
+              err = grub_env_set (varname, buf);
+            }
+          if (err != GRUB_ERR_NONE)
+            return err;
+        }
+    }
+
+  if (ctxt->state[1].set == 0)
+    {
+      FOR_NET_NETWORK_LEVEL_INTERFACES (inf)
+        {
+          grub_net_hwaddr_to_str (&inf->hwaddress, bufh);
+          grub_net_addr_to_str (&inf->address, bufn);
+          grub_net_vlan_to_str (inf->vlantag, bufv);
+          grub_printf ("%s %s %s %s\n", inf->name, bufh, bufn, bufv);
+        }
+    }
+
   return GRUB_ERR_NONE;
 }
 
@@ -2143,9 +2317,11 @@ grub_net_search_config_file (char *config, grub_size_t config_buf_len)
 
 static struct grub_preboot *fini_hnd;
 
-static grub_command_t cmd_addaddr, cmd_deladdr, cmd_addroute, cmd_delroute;
-static grub_command_t cmd_setvlan, cmd_lsroutes, cmd_lscards;
-static grub_command_t cmd_lsaddr, cmd_slaac;
+static grub_command_t cmd_addaddr, cmd_addroute;
+static grub_command_t cmd_setvlan, cmd_lsroutes;
+static grub_command_t cmd_slaac;
+static grub_extcmd_t cmd_deladdr, cmd_delroute;
+static grub_extcmd_t cmd_lsaddr, cmd_lscards;
 
 GRUB_MOD_INIT(net)
 {
@@ -2172,25 +2348,31 @@ GRUB_MOD_INIT(net)
 				     N_("[CARD [HWADDRESS]]"),
 				     N_("Perform an IPV6 autoconfiguration"));
 
-  cmd_deladdr = grub_register_command ("net_del_addr", grub_cmd_deladdr,
-				       N_("SHORTNAME"),
-				       N_("Delete a network address."));
+  cmd_deladdr = grub_register_extcmd ("net_del_addr", grub_cmd_deladdr, 0,
+				       N_("[--all|SHORTNAME]"),
+				       N_("Delete a network address."),
+                                       options_deladdr);
   cmd_addroute = grub_register_command ("net_add_route", grub_cmd_addroute,
 					/* TRANSLATORS: "gw" is a keyword.  */
 					N_("SHORTNAME NET [INTERFACE| gw GATEWAY]"),
 					N_("Add a network route."));
-  cmd_delroute = grub_register_command ("net_del_route", grub_cmd_delroute,
-					N_("SHORTNAME"),
-					N_("Delete a network route."));
+  cmd_delroute = grub_register_extcmd ("net_del_route", grub_cmd_delroute, 0,
+					N_("[--all|SHORTNAME]"),
+					N_("Delete a network route."),
+					options_delroute);
   cmd_setvlan = grub_register_command ("net_set_vlan", grub_cmd_setvlan,
 				       N_("SHORTNAME VLANID"),
 				       N_("Set an interface's vlan id."));
   cmd_lsroutes = grub_register_command ("net_ls_routes", grub_cmd_listroutes,
 					"", N_("list network routes"));
-  cmd_lscards = grub_register_command ("net_ls_cards", grub_cmd_listcards,
-				       "", N_("list network cards"));
-  cmd_lsaddr = grub_register_command ("net_ls_addr", grub_cmd_listaddrs,
-				       "", N_("list network addresses"));
+  cmd_lscards = grub_register_extcmd ("net_ls_cards", grub_cmd_listcards, 0,
+				       N_("[--set=[NUMBER:]VARNAME]"),
+                                       N_("list network cards"),
+                                       options_lscards);
+  cmd_lsaddr = grub_register_extcmd ("net_ls_addr", grub_cmd_listaddrs, 0,
+				     N_("[--set=[NUMBER:]VARNAME]"),
+                                     N_("list network addresses"),
+                                     options_lsaddr);
   grub_bootp_init ();
   grub_dns_init ();
 
@@ -2211,13 +2393,13 @@ GRUB_MOD_FINI(net)
   grub_bootp_fini ();
   grub_dns_fini ();
   grub_unregister_command (cmd_addaddr);
-  grub_unregister_command (cmd_deladdr);
+  grub_unregister_extcmd (cmd_deladdr);
   grub_unregister_command (cmd_addroute);
-  grub_unregister_command (cmd_delroute);
+  grub_unregister_extcmd (cmd_delroute);
   grub_unregister_command (cmd_setvlan);
   grub_unregister_command (cmd_lsroutes);
-  grub_unregister_command (cmd_lscards);
-  grub_unregister_command (cmd_lsaddr);
+  grub_unregister_extcmd (cmd_lscards);
+  grub_unregister_extcmd (cmd_lsaddr);
   grub_unregister_command (cmd_slaac);
   grub_fs_unregister (&grub_net_fs);
   grub_net_open = NULL;
