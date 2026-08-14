@@ -70,6 +70,9 @@
 /* RMO max. address at 768 MB */
 #define RMO_ADDR_MAX		(grub_uint64_t) (768 * 1024 * 1024)
 
+/* Default real-base value for AIX */
+#define AIX_DEFAULT_REAL_BASE (grub_uint32_t) (0x2800000)
+
 /*
  * The amount of OF space we will not claim here so as to leave space for
  * the loader and linux to service early allocations.
@@ -914,6 +917,10 @@ grub_claim_heap (void)
 #if defined(__powerpc__)
   grub_uint32_t ibm_ca_support_reboot = 0;
   grub_ssize_t actual;
+  grub_ieee1275_phandle_t options;
+  char real_base_str[12];
+  grub_uint32_t real_base = 0;
+  int aix_boot_detected = 0;
 #endif
 
   err = grub_ieee1275_total_mem (&rmo_top);
@@ -938,6 +945,25 @@ grub_claim_heap (void)
 
   if (grub_ieee1275_test_flag (GRUB_IEEE1275_FLAG_CAN_TRY_CAS_FOR_MORE_MEMORY))
     {
+      /*
+       * Check if the last booted OS was AIX, based on the real-base
+       * AIX_DEFAULT_REAL_BASE and rmo_top (512 MB).
+       */
+      if (grub_ieee1275_finddevice ("/options", &options) >= 0)
+        {
+          if (grub_ieee1275_get_property (options,
+                                          "real-base",
+                                          real_base_str,
+                                          sizeof (real_base_str),
+                                          &actual) >= 0)
+            {
+              real_base_str[sizeof (real_base_str) - 1] = 0;
+              real_base = grub_strtoul (real_base_str, 0, 10);
+              if (real_base == AIX_DEFAULT_REAL_BASE
+                  && rmo_top <= (512 * 1024 * 1024))
+                aix_boot_detected = 1;
+            }
+        }
       /*
        * If we have an error don't call CAS. Just hope for the best.
        * Along with the above, if the rmo_top is 512 MB or above. We
@@ -965,10 +991,14 @@ grub_claim_heap (void)
        * the MIN_RMA from 768, changed by GRUB, to 512, changed by Linux,
        * to 768, changed by GRUB, to 512, changed by Linux, and so on.
        * The machine will stuck in this CAS reboot loop forever.
+       * However, if the last booted OS is AIX. We need to call IBM Client
+       * Architecture Support to make sure we negotiate all the properties
+       * required to boot Linux.
        *
        * IBM PAPR: https://openpower.foundation/specifications/linuxonpower/
        */
-      if (!ibm_ca_support_reboot && err == GRUB_ERR_NONE && rmo_top < (512 * 1024 * 1024))
+      if (!ibm_ca_support_reboot && err == GRUB_ERR_NONE
+          && (rmo_top < (512 * 1024 * 1024) || aix_boot_detected))
         grub_ieee1275_ibm_cas ();
     }
 #endif
