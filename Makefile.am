@@ -7,6 +7,13 @@ SUBDIRS += grub-core
 endif
 SUBDIRS += po docs util/bash-completion.d
 
+# grub-core/lib/gnulib/libgnu.a is built by the gnulib sub-make.  When
+# 'make all' is run the SUBDIRS ordering guarantees it is built first, but a
+# direct invocation such as 'make fuzz-fs-ext2' skips the SUBDIRS descent.
+# This explicit rule makes the library available on demand in both cases.
+grub-core/lib/gnulib/libgnu.a:
+	$(MAKE) $(AM_MAKEFLAGS) -C grub-core/lib/gnulib libgnu.a
+
 include $(top_srcdir)/conf/Makefile.common
 include $(top_srcdir)/conf/Makefile.extra-dist
 
@@ -492,3 +499,5 @@ tests/syslinux/ubuntu10.04_grub.cfg: $(top_builddir)/config.status tests/syslinu
 	simplified_abs_top_srcdir=`echo "$(abs_top_srcdir)" | sed 's,//,/,g; s,/\./,/,g; :loop; s,/[^/][^/]*/\.\.\(/\|$$\),\1,; t loop'`; \
 	sed "s,@simplified_abs_top_srcdir@,$$simplified_abs_top_srcdir,g" $(srcdir)/tests/syslinux/ubuntu10.04_grub.cfg.in | $(top_builddir)/config.status --file=$@:-
 CLEANFILES += tests/syslinux/ubuntu10.04_grub.cfg
+
+include $(srcdir)/Makefile.fuzz.am
