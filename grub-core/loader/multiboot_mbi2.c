@@ -207,7 +207,7 @@ grub_multiboot2_load (grub_file_t file, const char *filename)
 	break;
 
       case MULTIBOOT_HEADER_TAG_ENTRY_ADDRESS_EFI64:
-#if defined (GRUB_MACHINE_EFI) && defined (__x86_64__)
+#if defined (GRUB_MACHINE_EFI) && GRUB_CPU_SIZEOF_VOID_P == 8
 	efi_entry_specified = 1;
 	efi_entry = ((struct multiboot_header_tag_entry_address *) tag)->entry_addr;
 #endif
@@ -721,12 +721,9 @@ grub_multiboot2_make_mbi (grub_uint32_t *target)
     return err;
 
   ptrorig = get_virtual_current_address (ch);
-#if defined (__i386__) || defined (__x86_64__)
   *target = get_physical_target_address (ch);
-#elif defined (__mips)
-  *target = get_physical_target_address (ch) | 0x80000000;
-#else
-#error Please complete this
+#ifdef __mips
+  *target |= 0x80000000;
 #endif
 
   mbistart = ptrorig;
@@ -882,7 +879,7 @@ grub_multiboot2_make_mbi (grub_uint32_t *target)
       }
   }
 
-#if defined (GRUB_MACHINE_EFI) && defined (__x86_64__)
+#if defined (GRUB_MACHINE_EFI) && GRUB_CPU_SIZEOF_VOID_P == 8
   {
     struct multiboot_tag_efi64 *tag = (struct multiboot_tag_efi64 *) ptrorig;
     tag->type = MULTIBOOT_TAG_TYPE_EFI64;
@@ -893,7 +890,7 @@ grub_multiboot2_make_mbi (grub_uint32_t *target)
   }
 #endif
 
-#if defined (GRUB_MACHINE_EFI) && defined (__i386__)
+#if defined (GRUB_MACHINE_EFI) && GRUB_CPU_SIZEOF_VOID_P == 4
   {
     struct multiboot_tag_efi32 *tag = (struct multiboot_tag_efi32 *) ptrorig;
     tag->type = MULTIBOOT_TAG_TYPE_EFI32;
@@ -970,7 +967,7 @@ grub_multiboot2_make_mbi (grub_uint32_t *target)
 	  / sizeof (grub_properly_aligned_t);
       }
 
-#ifdef __i386__
+#if GRUB_CPU_SIZEOF_VOID_P == 4
       {
 	struct multiboot_tag_efi32_ih *tag = (struct multiboot_tag_efi32_ih *) ptrorig;
 	tag->type = MULTIBOOT_TAG_TYPE_EFI32_IH;
@@ -981,7 +978,7 @@ grub_multiboot2_make_mbi (grub_uint32_t *target)
       }
 #endif
 
-#ifdef __x86_64__
+#if GRUB_CPU_SIZEOF_VOID_P == 8
       {
 	struct multiboot_tag_efi64_ih *tag = (struct multiboot_tag_efi64_ih *) ptrorig;
 	tag->type = MULTIBOOT_TAG_TYPE_EFI64_IH;

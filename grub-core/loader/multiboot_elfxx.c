@@ -238,12 +238,8 @@ CONCAT(grub_multiboot_load_elf, XX) (mbi_load_data_t *mld)
   if (i == phnum)
     return grub_error (GRUB_ERR_BAD_OS, "entry point isn't in a segment");
 
-#if defined (__i386__) || defined (__x86_64__)
-
-#elif defined (__mips)
+#ifdef __mips
   GRUB_MULTIBOOT (payload_eip) |= 0x80000000;
-#else
-#error Please complete this
 #endif
 
   if (shnum)
