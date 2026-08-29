@@ -1,8 +1,12 @@
 #!@BUILD_SHEBANG@
 set -u
 
-# grub-mkconfig must export GRUB_DISABLE_BOOTNEXT so the disable knob
-# documented in /etc/default/grub actually reaches 31_efi_bootnext.
+# grub-mkconfig must export the bootnext knobs documented in
+# /etc/default/grub so they actually reach 31_efi_bootnext.  The script has
+# two discovery modes sharing those knobs, and this test covers both:
+#   - the default config-time path (efibootmgr enumeration), and
+#   - the runtime path (GRUB_BOOTNEXT_DISCOVER_AT_BOOT=true -> a single efibootmenu
+#     command emitted into grub.cfg, discovery deferred to boot time).
 # Copyright (C) 2026  Thomas Grainger <tagrain@gmail.com>
 #
 # GRUB is free software: you can redistribute it and/or modify
@@ -18,21 +22,12 @@ set -u
 # You should have received a copy of the GNU General Public License
 # along with GRUB.  If not, see <http://www.gnu.org/licenses/>.
 #
-# Strategy: build a sandbox /etc with GRUB_DISABLE_BOOTNEXT=true and the
-# only grub.d helper being the unmodified 31_efi_bootnext.  Put an
-# efibootmgr stub on PATH that touches a sentinel file and exits
-# non-zero if invoked, then run grub-mkconfig.  If GRUB_DISABLE_BOOTNEXT
-# propagates the helper exits 0 at its very first check and never
-# reaches efibootmgr; the sentinel must not appear.  Without the export
-# the helper falls through and trips the stub.
-
-# 31_efi_bootnext bails early on hosts without /sys/firmware/efi, which
-# would mask the bug.  Only run where the disable check is actually
-# exercised.
-if [ ! -d /sys/firmware/efi ]; then
-    echo "SKIP: /sys/firmware/efi not present on host" >&2
-    exit 77
-fi
+# Strategy: build a sandbox /etc whose only grub.d helper is the unmodified
+# 31_efi_bootnext, plus an efibootmgr stub on PATH that touches a sentinel
+# and exits non-zero if the config-time path ever reaches it.  Drive
+# grub-mkconfig with different /etc/default/grub contents and inspect the
+# generated grub.cfg.  If grub-mkconfig fails to export a variable to its
+# grub.d children the assertions below catch it.
 
 builddir="@builddir@"
 [ -d "$builddir" ] || builddir="$PWD"
@@ -73,19 +68,15 @@ exit 0
 STUB
 done
 
-# Trap: if 31_efi_bootnext reaches efibootmgr, leave a sentinel behind.
+# Trap: if the config-time path reaches efibootmgr, leave a sentinel behind.
 cat > "$tmp/bin/efibootmgr" <<EOF
 #!/bin/sh
 touch "$tmp/efibootmgr-called"
-echo "trap: efibootmgr invoked under GRUB_DISABLE_BOOTNEXT=true" >&2
+echo "trap: efibootmgr invoked by 31_efi_bootnext" >&2
 exit 1
 EOF
 
 chmod +x "$tmp/bin"/*
-
-cat > "$tmp/etc/default/grub" <<'EOF'
-GRUB_DISABLE_BOOTNEXT=true
-EOF
 
 cp "$src_helper" "$tmp/etc/grub.d/31_efi_bootnext"
 chmod +x "$tmp/etc/grub.d/31_efi_bootnext"
@@ -103,17 +94,87 @@ sed -e "s|^prefix=\".*\"\$|prefix=\"$tmp\"|" \
     "$src_mkconfig" > "$tmp/bin/grub-mkconfig"
 chmod +x "$tmp/bin/grub-mkconfig"
 
-if ! out=$(PATH="$tmp/bin:$PATH" "$tmp/bin/grub-mkconfig" 2>&1); then
-    echo "FAIL: grub-mkconfig exited non-zero" >&2
-    printf '%s\n' "$out" >&2
+# Run grub-mkconfig with the given /etc/default/grub; leave grub.cfg in
+# $tmp/cfg.  Runs in the main shell so a failure aborts the whole test.
+run_mkconfig () {
+    printf '%s\n' "$1" > "$tmp/etc/default/grub"
+    if ! PATH="$tmp/bin:$PATH" "$tmp/bin/grub-mkconfig" \
+            > "$tmp/cfg" 2>"$tmp/err"; then
+        echo "FAIL: grub-mkconfig exited non-zero" >&2
+        cat "$tmp/err" >&2
+        exit 1
+    fi
+}
+
+# --- runtime path -----------------------------------------------------------
+# The runtime branch emits efibootmenu before the /sys/firmware/efi check, so
+# these cases are host-independent and run everywhere.
+
+# 1. Disable knob suppresses the command even when runtime mode is requested.
+run_mkconfig 'GRUB_DISABLE_BOOTNEXT=true
+GRUB_BOOTNEXT_DISCOVER_AT_BOOT=true'
+if grep -q 'efibootmenu' "$tmp/cfg"; then
+    echo "FAIL: efibootmenu emitted despite GRUB_DISABLE_BOOTNEXT=true" >&2
     exit 1
 fi
 
-if [ -f "$tmp/efibootmgr-called" ]; then
-    echo "FAIL: 31_efi_bootnext invoked efibootmgr despite GRUB_DISABLE_BOOTNEXT=true;" >&2
-    echo "      grub-mkconfig did not export the variable to grub.d children." >&2
-    printf -- '--- grub-mkconfig output ---\n%s\n----------------------------\n' "$out" >&2
+# 2. Runtime mode off (default): the config-time path never emits the command.
+run_mkconfig ''
+if grep -q 'efibootmenu' "$tmp/cfg"; then
+    echo "FAIL: efibootmenu emitted without GRUB_BOOTNEXT_DISCOVER_AT_BOOT=true" >&2
+    cat "$tmp/cfg" >&2
     exit 1
+fi
+
+# 3. Runtime mode on: the command is emitted with no flags.
+run_mkconfig 'GRUB_BOOTNEXT_DISCOVER_AT_BOOT=true'
+if ! grep -Eq '^[[:space:]]*efibootmenu[[:space:]]*$' "$tmp/cfg"; then
+    echo "FAIL: runtime mode did not emit a bare efibootmenu command" >&2
+    cat "$tmp/cfg" >&2
+    exit 1
+fi
+
+# 4. Knobs map to flags (proves the vars are exported to the helper).
+run_mkconfig 'GRUB_BOOTNEXT_DISCOVER_AT_BOOT=true
+GRUB_BOOTNEXT_OMIT_INACTIVE=true
+GRUB_SAVEDEFAULT=true
+GRUB_BOOTNEXT_CATEGORY_BOOT_ONLY=true'
+if ! grep -q 'efibootmenu --omit-inactive --savedefault --category-boot-only' "$tmp/cfg"; then
+    echo "FAIL: bootnext knobs did not map to efibootmenu flags" >&2
+    cat "$tmp/cfg" >&2
+    exit 1
+fi
+
+# 5. Submenu knob wraps the command in a submenu block (and proves the
+#    variable is exported to the helper).
+run_mkconfig 'GRUB_BOOTNEXT_DISCOVER_AT_BOOT=true
+GRUB_BOOTNEXT_SUBMENU=true'
+if ! grep -q "submenu .*efi-bootnext-submenu" "$tmp/cfg" || \
+   ! grep -Eq '^[[:space:]]+efibootmenu[[:space:]]*$' "$tmp/cfg"; then
+    echo "FAIL: GRUB_BOOTNEXT_SUBMENU=true did not wrap efibootmenu in a submenu" >&2
+    cat "$tmp/cfg" >&2
+    exit 1
+fi
+
+# --- config-time path -------------------------------------------------------
+# 31_efi_bootnext bails early on hosts without /sys/firmware/efi, which would
+# stop before efibootmgr and mask a missing GRUB_DISABLE_BOOTNEXT export.  So
+# only exercise this where the disable check is actually reached.
+if [ -d /sys/firmware/efi ]; then
+    # 6. GRUB_DISABLE_BOOTNEXT must stop the config-time path before
+    #    efibootmgr.  If it propagates, the helper exits at its first check
+    #    and the sentinel never appears; without the export it falls through
+    #    and trips the stub.
+    rm -f "$tmp/efibootmgr-called"
+    run_mkconfig 'GRUB_DISABLE_BOOTNEXT=true'
+    if [ -f "$tmp/efibootmgr-called" ]; then
+        echo "FAIL: config-time path invoked efibootmgr despite GRUB_DISABLE_BOOTNEXT=true;" >&2
+        echo "      grub-mkconfig did not export the variable to grub.d children." >&2
+        cat "$tmp/err" >&2
+        exit 1
+    fi
+else
+    echo "note: /sys/firmware/efi absent; config-time efibootmgr check skipped" >&2
 fi
 
 exit 0

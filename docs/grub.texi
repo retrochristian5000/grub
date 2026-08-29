@@ -1589,6 +1589,41 @@ entries that are marked inactive (i.e. not flagged active with @samp{*} in
 By default inactive entries are included, since @samp{BootNext} can target
 them even when they are absent from @samp{BootOrder}.
 
+@item GRUB_BOOTNEXT_DISCOVER_AT_BOOT
+If set to @samp{true}, @file{31_efi_bootnext} emits a single
+@command{efibootmenu} command into @file{grub.cfg} instead of baking in
+static menu entries.  @command{efibootmenu} discovers the EFI boot options
+at boot time rather than at @command{grub-mkconfig} time, so the entries
+reflect the firmware's current boot options even when @file{grub.cfg} was
+generated on another host or shipped without running the @file{grub.d}
+scripts.  @command{efibootmenu} excludes its own entry by matching the
+running image's ESP partition and @file{\EFI\<vendor>\} directory -- the same
+basis as the config-time path -- falling back to @samp{BootCurrent} only when
+the running image cannot be identified.  The @samp{GRUB_BOOTNEXT_OMIT_INACTIVE},
+@samp{GRUB_SAVEDEFAULT} and @samp{GRUB_BOOTNEXT_CATEGORY_BOOT_ONLY} knobs map to
+the command's @option{--omit-inactive}, @option{--savedefault} and
+@option{--category-boot-only} flags.  Unlike the config-time path,
+@command{efibootmenu} always omits entries carrying the firmware's
+@samp{HIDDEN} attribute, which @command{efibootmgr} output does not expose
+at generation time.
+
+@item GRUB_BOOTNEXT_CATEGORY_BOOT_ONLY
+If set to @samp{true} together with @samp{GRUB_BOOTNEXT_DISCOVER_AT_BOOT},
+@command{efibootmenu} skips EFI boot manager entries whose load option
+category is not the boot category (e.g. firmware applications).
+
+@item GRUB_BOOTNEXT_SUBMENU
+If set to @samp{true}, the EFI BootNext entries are grouped into a
+@samp{UEFI boot entries} submenu instead of appearing in the top-level
+menu.  This applies to both discovery modes: the config-time path wraps
+its generated entries in a @command{submenu} block, while the runtime
+path places the @command{efibootmenu} command inside one, so the boot
+options are then discovered when the submenu is entered.  The entry
+identifiers gain the submenu prefix
+(@samp{efi-bootnext-submenu>efi-bootnext-XXXX}), which matters when one
+is named explicitly in @samp{GRUB_DEFAULT}; @samp{GRUB_SAVEDEFAULT}
+records the prefixed form automatically.
+
 @item GRUB_DISABLE_SUBMENU
 Normally, @command{grub-mkconfig} will generate top level menu entry for
 the kernel with highest version number and put all other found kernels

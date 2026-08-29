@@ -34,6 +34,57 @@ if [ "${GRUB_DISABLE_BOOTNEXT}" = "true" ]; then
     exit 0
 fi
 
+# Two discovery modes share the GRUB_BOOTNEXT_* knobs:
+#
+#   - Config-time (default, below): enumerate the firmware boot options here
+#     with efibootmgr and bake one static menu entry per option into grub.cfg.
+#     Filters non-OS and self entries using the local install (os-prober and
+#     the SELF_* detection), so it needs a populated NVRAM at generation time.
+#
+#   - Runtime (GRUB_BOOTNEXT_DISCOVER_AT_BOOT=true): emit a single
+#     efibootmenu command that discovers the boot options at boot time
+#     instead.  Works where grub.cfg is regenerated on a different host or
+#     the grub.d scripts are not run, as long as grub.cfg invokes the
+#     command.  It excludes its own entry by matching the running image's
+#     ESP partition and \EFI\<vendor>\ dir (the same basis as the SELF_*
+#     detection below), falling back to BootCurrent only when the running
+#     image cannot be identified.
+#
+# GRUB_BOOTNEXT_SUBMENU=true additionally groups the entries of either
+# mode into a single "UEFI boot entries" submenu instead of the top-level
+# menu.
+
+# The submenu entry both modes share; entries inside it get ids of the
+# form efi-bootnext-submenu>efi-bootnext-XXXX.
+emit_submenu_open () {
+    cat << EOF
+  submenu '$(gettext_printf "UEFI boot entries" | grub_quote)' --class efi \$menuentry_id_option 'efi-bootnext-submenu' {
+EOF
+}
+
+if [ "${GRUB_BOOTNEXT_DISCOVER_AT_BOOT}" = "true" ]; then
+    FLAGS=
+    if [ "${GRUB_BOOTNEXT_OMIT_INACTIVE}" = "true" ]; then
+        FLAGS="${FLAGS} --omit-inactive"
+    fi
+    if [ "${GRUB_SAVEDEFAULT}" = "true" ]; then
+        FLAGS="${FLAGS} --savedefault"
+    fi
+    if [ "${GRUB_BOOTNEXT_CATEGORY_BOOT_ONLY}" = "true" ]; then
+        FLAGS="${FLAGS} --category-boot-only"
+    fi
+    printf '%s\n' 'if [ "$grub_platform" = "efi" ]; then'
+    if [ "${GRUB_BOOTNEXT_SUBMENU}" = "true" ]; then
+        # Discovery then runs when the submenu is entered.
+        emit_submenu_open
+        printf '%s\n' "    efibootmenu${FLAGS}" '  }'
+    else
+        printf '%s\n' "  efibootmenu${FLAGS}"
+    fi
+    printf '%s\n' 'fi'
+    exit 0
+fi
+
 # Bail out early and silently on systems other than Linux with the EFI
 # subsystem present.  /sys/firmware/efi is the Linux EFI sysfs interface;
 # its absence means either a non-EFI boot or a non-Linux system whose
@@ -156,7 +207,14 @@ fi
 # rejection) do not update grubenv.  Cf. 30_os-prober.in:204.
 SAVEDEFAULT="`save_default_entry`"
 
-printf '%s\n' "${EFI_OUTPUT}" | \
+# The classes every entry carries.  A class derived from the entry label is
+# prepended to these below.  Cf. 10_linux.in:28
+BASE_CLASS="--class efi --class os"
+
+# The entries are buffered so nothing is emitted when every firmware entry
+# is filtered out, and so GRUB_BOOTNEXT_SUBMENU=true can wrap them all in
+# one submenu block.  A single $grub_platform guard covers them.
+ENTRIES="$(printf '%s\n' "${EFI_OUTPUT}" | \
     sed -n "s/^Boot\([0-9A-Fa-f]\{4\}\)${ACTIVE_PAT} *\([^${TAB}]*\)${TAB}\{0,1\}\(.*\)/\1${TAB}\2${TAB}\3/p" | \
 while IFS="${TAB}" read -r bootnum label devpath; do
 
@@ -224,21 +282,36 @@ while IFS="${TAB}" read -r bootnum label devpath; do
     # with trailing digits and non-alnum stripped.
     # e.g. "Windows Boot Manager" -> "windows"
     # Cf. 30_os-prober.in:156
-    CLASS="`printf '%s\n' "${label}" | cut -d' ' -f1 | tr 'A-Z' 'a-z' | \
+    # It precedes the base classes: themes pick the first class with an
+    # icon, so an OS icon wins when the theme has one and efi is the
+    # fallback.
+    class_main="`printf '%s\n' "${label}" | cut -d' ' -f1 | tr 'A-Z' 'a-z' | \
         LC_ALL=C sed 's,[[:digit:]]*$,,' | LC_ALL=C sed 's,[^[:alnum:]_],_,g'`"
-    [ -z "${CLASS}" ] && CLASS="efi"
-    CLASS="--class ${CLASS}"
+    CLASS="${BASE_CLASS}"
+    if [ -n "${class_main}" ] && [ "${class_main}" != "efi" ]; then
+        CLASS="--class ${class_main} ${CLASS}"
+    fi
 
     # Cf. 30_uefi-firmware.in:34
     cat << EOF
-if [ "\$grub_platform" = "efi" ]; then
-  menuentry '$(gettext_printf "%s (EFI BootNext)" "${label}" | grub_quote)' $CLASS --class os \$menuentry_id_option 'efi-bootnext-${bootnum}' {
+  menuentry '$(gettext_printf "%s (EFI BootNext)" "${label}" | grub_quote)' ${CLASS} \$menuentry_id_option 'efi-bootnext-${bootnum}' {
     if bootnext ${bootnum}; then
       ${SAVEDEFAULT}
       reboot
     fi
   }
-fi
 EOF
 
-done
+done)"
+
+[ -n "${ENTRIES}" ] || exit 0
+
+printf '%s\n' 'if [ "$grub_platform" = "efi" ]; then'
+if [ "${GRUB_BOOTNEXT_SUBMENU}" = "true" ]; then
+    emit_submenu_open
+    printf '%s\n' "${ENTRIES}" | sed 's/^/  /'
+    printf '%s\n' '  }'
+else
+    printf '%s\n' "${ENTRIES}"
+fi
+printf '%s\n' 'fi'
