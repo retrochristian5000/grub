@@ -30,9 +30,19 @@ static char asn1_error[ASN1_MAX_ERROR_DESCRIPTION_SIZE];
 /* RFC 5652 s 5.1. */
 static const char *signed_data_oid = "1.2.840.113549.1.7.2";
 static const grub_int32_t signed_data_oid_len = 20;
+static const char *oid_pkcs7_data = "1.2.840.113549.1.7.1";
+static const grub_int32_t oid_pkcs7_data_len = 20;
 
 static const char *common_name_oid = "2.5.4.3";
 static const grub_int32_t common_name_oid_len = 7;
+
+/* Signed attribute oids. */
+static const char *oid_content_type = "1.2.840.113549.1.9.3";
+static const grub_int32_t oid_content_type_len = 20;
+static const char *oid_msg_digest = "1.2.840.113549.1.9.4";
+static const grub_int32_t oid_msg_digest_len = 20;
+static const char *oid_signing_time = "1.2.840.113549.1.9.5";
+static const grub_int32_t oid_signing_time_len = 20;
 
 /* RFC 4055 s 2.1. */
 static const grub_pkcs7_mdalgo_t md_algos[] =
@@ -288,6 +298,237 @@ pkcs7_get_signerinfo_md_algo (asn1_node pkcs7_asn1, grub_int32_t signer_index,
 }
 
 static grub_err_t
+pkcs7_verify_content_type (const asn1_node pkcs7_asn1,
+                           const grub_int32_t signer_index,
+                           const grub_int32_t attr_index)
+{
+  grub_err_t ret = GRUB_ERR_NONE;
+  char oid[GRUB_MAX_OID_LEN] = { 0 };
+  char *attr_path;
+  grub_uint8_t *content_type;
+  grub_int32_t rc, len, ret_len;
+  grub_int32_t oid_len = sizeof (oid);
+
+  attr_path = grub_xasprintf ("signerInfos.?%d.signedAttrs.?%d.values.?1",
+                              signer_index + 1, attr_index);
+  if (attr_path == NULL)
+    return grub_error (GRUB_ERR_OUT_OF_MEMORY, "out of memory");
+
+  content_type = grub_asn1_allocate_and_read (pkcs7_asn1, attr_path,
+                                              "signedAttrs contentType value", &len);
+  grub_free (attr_path);
+  if (content_type == NULL)
+    return grub_errno;
+
+  if (len <= 2)
+    {
+      ret = grub_error (GRUB_ERR_BAD_FILE_TYPE,
+                        "signer %d: signedAttrs.contentType value is too short",
+                        signer_index);
+      goto exit;
+    }
+
+  /* The tag 0x06 = OBJECT IDENTIFIER. */
+  if (content_type[0] != 0x06)
+    {
+      ret = grub_error (GRUB_ERR_BAD_FILE_TYPE,
+                        "signer %d: signedAttrs.contentType expected tag (0x06): 0x%02x",
+                        signer_index, content_type[0]);
+      goto exit;
+    }
+
+  rc = asn1_get_object_id_der (content_type + 1, len - 1, &ret_len, oid, oid_len);
+  if (rc != ASN1_SUCCESS)
+    {
+      ret = grub_error (GRUB_ERR_BAD_FILE_TYPE,
+                        "signer %d: signedAttrs.contentType failed to translate raw OID: %s",
+                        signer_index, asn1_strerror (rc));
+      goto exit;
+    }
+
+  if (oid_pkcs7_data_len != (grub_int32_t) grub_strlen (oid) ||
+      grub_strncmp (oid_pkcs7_data, oid, oid_pkcs7_data_len) != 0)
+    ret = grub_error (GRUB_ERR_BAD_FILE_TYPE,
+                      "signer %d: signedAttrs.contentType '%s' is unexpected OID",
+                      signer_index, oid);
+
+ exit:
+  grub_free (content_type);
+
+  return ret;
+}
+
+static grub_err_t
+pkcs7_get_msg_digest (const asn1_node pkcs7_asn1, const grub_int32_t signer_index,
+                      const grub_int32_t attr_index, grub_pkcs7_signer_t *signer)
+{
+  grub_err_t ret = GRUB_ERR_NONE;
+  char *attr_path;
+  grub_uint8_t *msg_digest;
+  grub_int32_t len;
+
+  attr_path = grub_xasprintf ("signerInfos.?%d.signedAttrs.?%d.values.?1",
+                              signer_index + 1, attr_index);
+  if (attr_path == NULL)
+    return grub_error (GRUB_ERR_OUT_OF_MEMORY, "out of memory");
+
+  msg_digest = grub_asn1_allocate_and_read (pkcs7_asn1, attr_path,
+                                            "signedAttrs messageDigest value", &len);
+  grub_free (attr_path);
+  if (msg_digest == NULL)
+    return grub_errno;
+
+  if (len <= 2)
+    {
+      ret = grub_error (GRUB_ERR_BAD_FILE_TYPE,
+                        "signer %d: signedAttrs.messageDigest value is too short",
+                        signer_index);
+      goto exit;
+    }
+
+  /* The tag 0x04 = OCTET STRING. */
+  if (msg_digest[0] != 0x04)
+    {
+      ret = grub_error (GRUB_ERR_BAD_FILE_TYPE,
+                        "signer %d: signedAttrs.messageDigest is expected tag (0x04): 0x%02x",
+                        signer_index, msg_digest[0]);
+      goto exit;
+    }
+
+  if (len - 2 != SHA256_HASH_SIZE && len - 2 != SHA512_HASH_SIZE)
+    {
+      ret = grub_error (GRUB_ERR_BAD_SIGNATURE,
+                        "signer %d: signedAttrs.messageDigest length %d is invalid",
+                        signer_index, len - 2);
+      goto exit;
+    }
+
+  signer->signed_attrs.msg_digest = grub_zalloc (len);
+  if (signer->signed_attrs.msg_digest == NULL)
+    {
+      ret = grub_error (GRUB_ERR_OUT_OF_MEMORY, "out of memory");
+      goto exit;
+    }
+
+  grub_memcpy (signer->signed_attrs.msg_digest, msg_digest + 2, len - 2);
+  signer->signed_attrs.msg_digest_len = len - 2;
+
+ exit:
+  grub_free (msg_digest);
+
+  return ret;
+}
+
+static grub_err_t
+pkcs7_get_signing_time (const asn1_node pkcs7_asn1, const grub_int32_t signer_index,
+                        const grub_int32_t attr_index, grub_pkcs7_signer_t *signer)
+{
+  grub_err_t ret;
+  char *attr_path, *raw_time;
+  grub_int32_t len;
+
+  attr_path = grub_xasprintf ("signerInfos.?%d.signedAttrs.?%d.values.?1",
+                              signer_index + 1, attr_index);
+  if (attr_path == NULL)
+    return grub_error (GRUB_ERR_OUT_OF_MEMORY, "out of memory");
+
+  raw_time = grub_asn1_allocate_and_read (pkcs7_asn1, attr_path,
+                                          "signedAttrs signingTime value", &len);
+  grub_free (attr_path);
+  if (raw_time == NULL)
+    return grub_errno;
+
+  if (len <= 2)
+    {
+      ret = grub_error (GRUB_ERR_BAD_FILE_TYPE,
+                        "signer %d: signedAttrs.signingTime value is too short",
+                        signer_index);
+      goto exit;
+    }
+
+  /* The tag 0x17 = UTCTime, tag 0x18 = GeneralizedTime. */
+  if (raw_time[0] != 0x17 && raw_time[0] != 0x18)
+    {
+      ret = grub_error (GRUB_ERR_BAD_FILE_TYPE,
+                        "signer %d: signedAttrs.signingTime has unexpected tag 0x%02x, "
+                        "expected UTCTime (0x17) or GeneralizedTime (0x18)",
+                        signer_index, raw_time[0]);
+      goto exit;
+    }
+
+  ret = grub_asn1_decode_datetime (raw_time + 2, len - 2,
+                                   &signer->signed_attrs.signing_time);
+
+ exit:
+  grub_free (raw_time);
+
+  return ret;
+}
+
+static grub_err_t
+pkcs7_read_attribute (const asn1_node pkcs7_asn1, const grub_int32_t signer_index,
+                      grub_pkcs7_signer_t *signer)
+{
+  grub_err_t ret = GRUB_ERR_NONE;
+  grub_int32_t rc, i;
+  grub_int32_t attr_count;
+  char *attr_path;
+  char type_oid[GRUB_MAX_OID_LEN];
+  grub_int32_t type_oid_len = sizeof (type_oid);
+
+  attr_path = grub_xasprintf ("signerInfos.?%d.signedAttrs", signer_index + 1);
+  if (attr_path == NULL)
+    return grub_error (GRUB_ERR_OUT_OF_MEMORY, "out of memory");
+
+  rc = asn1_number_of_elements (pkcs7_asn1, attr_path, &attr_count);
+  grub_free (attr_path);
+  if (rc != ASN1_SUCCESS)
+    return grub_error (GRUB_ERR_BAD_SIGNATURE, "error counting signedAttrs: %s",
+                       asn1_strerror (rc));
+
+  for (i = 1; i <= attr_count; i++)
+    {
+      attr_path = grub_xasprintf ("signerInfos.?%d.signedAttrs.?%d.type",
+                                  signer_index + 1, i);
+      if (attr_path == NULL)
+        return grub_error (GRUB_ERR_OUT_OF_MEMORY, "out of memory");
+
+      rc = asn1_read_value(pkcs7_asn1, attr_path, type_oid, &type_oid_len);
+      grub_free (attr_path);
+      if (rc != ASN1_SUCCESS || type_oid_len == 0)
+        return grub_error (GRUB_ERR_BAD_SIGNATURE,
+                           "error reading signer %d's signedAttrs: %s", signer_index,
+                           ((rc != ASN1_SUCCESS) ? asn1_strerror (rc) : "contains zero bytes"));
+
+      if (oid_content_type_len == type_oid_len - 1 &&
+          grub_strncmp (oid_content_type, type_oid, type_oid_len) == 0)
+        {
+          ret = pkcs7_verify_content_type (pkcs7_asn1, signer_index, i);
+          if (ret != GRUB_ERR_NONE)
+            break;
+        }
+      else if (oid_msg_digest_len == type_oid_len - 1 &&
+               grub_strncmp (oid_msg_digest, type_oid, oid_msg_digest_len) == 0)
+        {
+          ret = pkcs7_get_msg_digest (pkcs7_asn1, signer_index, i, signer);
+          if (ret != GRUB_ERR_NONE)
+            break;
+        }
+      else if (oid_signing_time_len == type_oid_len - 1 &&
+               grub_strncmp (oid_signing_time, type_oid, oid_signing_time_len) == 0)
+        {
+          ret = pkcs7_get_signing_time (pkcs7_asn1, signer_index, i, signer);
+          if (ret != GRUB_ERR_NONE)
+            break;
+        }
+
+      type_oid_len = sizeof (type_oid);
+    }
+
+  return ret;
+}
+
+static grub_err_t
 pkcs7_get_signerinfo_signed_attrs (const grub_uint8_t *raw_data,
                                    const grub_int32_t raw_data_len,
                                    const asn1_node pkcs7_asn1,
@@ -341,6 +582,8 @@ pkcs7_get_signerinfo_signed_attrs (const grub_uint8_t *raw_data,
 
       signer->signed_attrs.raw = attr_raw;
       signer->signed_attrs.raw_len = attr_raw_len;
+
+      return pkcs7_read_attribute (pkcs7_asn1, signer_index, signer);
     }
 
   return GRUB_ERR_NONE;
@@ -710,10 +953,9 @@ static grub_err_t
 pkcs7_get_signer_cert (const grub_pkcs7_signer_t *signer,
                        const grub_x509_cert_t *trust_certs,
                        const grub_pkcs7_rcl_t *rcl,
-                       const grub_x509_cert_t **signer_cert,
-                       bool *cert_revoked)
+                       const grub_x509_cert_t **signer_cert)
 {
-  grub_err_t ret = GRUB_ERR_BAD_SIGNATURE;
+  grub_err_t ret = GRUB_ERR_FILE_NOT_FOUND;
   const grub_x509_cert_t *pk;
 
   for (pk = trust_certs; pk != NULL; pk = pk->next)
@@ -726,8 +968,6 @@ pkcs7_get_signer_cert (const grub_pkcs7_signer_t *signer,
           ret = pkcs7_check_aginst_rcl (rcl, pk);
           if (ret == GRUB_ERR_NONE)
             *signer_cert = pk;
-          else
-            *cert_revoked = true;
 
           return ret;
         }
@@ -741,20 +981,142 @@ pkcs7_get_signer_cert (const grub_pkcs7_signer_t *signer,
 }
 
 static grub_err_t
+pkcs7_verify_msgdigest (const grub_pkcs7_signedattr_t *signed_attr,
+                        const gcry_md_spec_t *hash,
+                        const grub_uint8_t *data,
+                        const grub_size_t data_len,
+                        const grub_int32_t signer_index)
+{
+  grub_uint8_t *msgdigest;
+
+  if (signed_attr->msg_digest == NULL)
+    {
+      grub_dprintf ("appendedsig", "signer %d: no message digest\n", signer_index);
+      return GRUB_ERR_BAD_SIGNATURE;
+    }
+
+  msgdigest = grub_zalloc (hash->mdlen);
+  if (msgdigest == NULL)
+    return grub_error (GRUB_ERR_OUT_OF_MEMORY,
+                       "could not allocate memory for msgdigest");
+
+  grub_crypto_hash (hash, msgdigest, data, data_len);
+  if ((grub_int32_t) hash->mdlen != signed_attr->msg_digest_len)
+    {
+      grub_dprintf ("appendedsig", "signer %d: invalid digest size (%d)\n",
+                    signer_index, signed_attr->msg_digest_len);
+      return GRUB_ERR_BAD_SIGNATURE;
+    }
+
+  if (grub_memcmp (signed_attr->msg_digest, msgdigest, signed_attr->msg_digest_len) != 0)
+    {
+      grub_dprintf ("appendedsig", "signer %d: message digest doesn't match\n", signer_index);
+      return GRUB_ERR_BAD_SIGNATURE;
+    }
+
+ return GRUB_ERR_NONE;
+
+}
+
+static grub_err_t
+pkcs7_verify_signature (const grub_pkcs7_signer_t *signer,
+                        const grub_uint8_t *data,
+                        const grub_size_t data_len,
+                        const grub_int32_t signer_index,
+                        const grub_x509_cert_t *pk)
+{
+  grub_err_t ret;
+
+  if (signer->signed_attrs.raw != NULL)
+    ret = pk->spki.pk_algo.verify (signer->signed_attrs.raw,
+                                   signer->signed_attrs.raw_len,
+                                   signer->md_algo.hash,
+                                   signer->sig, signer->sig_len,
+                                   &pk->spki.pk, pk->spki.pk_algo.aliases);
+  else
+    ret = pk->spki.pk_algo.verify (data, data_len, signer->md_algo.hash,
+                                   signer->sig, signer->sig_len,
+                                   &pk->spki.pk, pk->spki.pk_algo.aliases);
+  if (ret != GRUB_ERR_NONE)
+    grub_dprintf ("appendedsig",
+                  "verify signer %d signatureAlgorithm (%s), issuer ('%s'), and "
+                  "serialNumber (%s) with key PK-Algorithm (%s), issuer ('%s'), "
+                  "and serialNumber (%s) failed\n",
+                  signer_index, signer->sig_algo.name, signer->issuer, signer->serial,
+                  pk->spki.pk_algo.name, pk->issuer, pk->serial);
+  else
+    grub_dprintf ("appendedsig",
+                  "verify signer %d signatureAlgorithm (%s), issuer ('%s'), and "
+                  "serialNumber (%s) with key PK-Algorithm (%s), issuer ('%s'), "
+                  "and serialNumber (%s) succeeded\n",
+                  signer_index, signer->sig_algo.name, signer->issuer, signer->serial,
+                  pk->spki.pk_algo.name, pk->issuer, pk->serial);
+
+  return ret;
+}
+
+/* Verify one signed information block from a PKCS#7 message. */
+static grub_err_t
+pkcs7_verify_one (const grub_pkcs7_signer_t *signer,
+                  const grub_x509_cert_t *trust_certs,
+                  const grub_pkcs7_rcl_t *rcl,
+                  const grub_uint8_t *data,
+                  const grub_size_t data_len,
+                  const grub_int32_t signer_index)
+{
+  grub_err_t ret;
+  const grub_x509_cert_t *pk;
+
+  ret = pkcs7_get_signer_cert (signer, trust_certs, rcl, &pk);
+  if (ret != GRUB_ERR_NONE)
+    return ret;
+
+  ret = pkcs7_verify_signature (signer, data, data_len, signer_index, pk);
+  if (ret != GRUB_ERR_NONE)
+    return ret;
+
+  /*
+   * If there are authenticated attributes, there must be a
+   * message digest attribute amongst them.
+   */
+  if (signer->signed_attrs.raw != NULL)
+    {
+      ret = pkcs7_verify_msgdigest (&signer->signed_attrs, signer->md_algo.hash,
+                                    data, data_len, signer_index);
+      if (ret != GRUB_ERR_NONE)
+        return ret;
+
+      /*
+       * Check that the PKCS#7 signing time is valid according to the X.509
+       * certificate.  We can't, however, check against the system clock
+       * since that may not have been set yet and may be wrong.
+       */
+      if (signer->signed_attrs.signing_time != 0 &&
+          (signer->signed_attrs.signing_time < pk->validity.before ||
+           signer->signed_attrs.signing_time > pk->validity.after))
+        {
+          grub_dprintf ("appendedsig",
+                        "signer %d: signed outside of X.509 validity window\n",
+                        signer_index);
+          return GRUB_ERR_BAD_SIGNATURE;
+        }
+    }
+
+  return ret;
+}
+
+static grub_err_t
 pkcs7_signed_data_verify (const grub_pkcs7_signed_data_t *pkcs7,
                           const grub_x509_cert_t *trust_certs,
                           const grub_pkcs7_rcl_t *rcl,
                           const grub_uint8_t *data,
-                          const grub_size_t data_len,
-                          bool *cert_revoked)
+                          const grub_size_t data_len)
 {
   grub_int32_t i = 0;
   grub_err_t ret = GRUB_ERR_BAD_SIGNATURE;
   grub_pkcs7_signer_t *signer;
-  const grub_x509_cert_t *pk;
 
-  if (pkcs7 == NULL || trust_certs == NULL || data == NULL ||
-      data_len == 0 || cert_revoked == NULL)
+  if (pkcs7 == NULL || trust_certs == NULL || data == NULL || data_len == 0)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, "bad input data");
 
   if (pkcs7->no_of_signers == 0 || pkcs7->signers == NULL)
@@ -762,37 +1124,16 @@ pkcs7_signed_data_verify (const grub_pkcs7_signed_data_t *pkcs7,
 
   for (signer = pkcs7->signers; signer != NULL; signer = signer->next, i++)
     {
-      ret = pkcs7_get_signer_cert (signer, trust_certs, rcl, &pk, cert_revoked);
+      ret = pkcs7_verify_one (signer, trust_certs, rcl, data, data_len, i);
       if (ret != GRUB_ERR_NONE)
-        continue;
-
-      if (signer->signed_attrs.raw != NULL)
-        ret = pk->spki.pk_algo.verify (signer->signed_attrs.raw,
-                                       signer->signed_attrs.raw_len,
-                                       signer->md_algo.hash,
-                                       signer->sig, signer->sig_len,
-                                       &pk->spki.pk, pk->spki.pk_algo.aliases);
-      else
-        ret = pk->spki.pk_algo.verify (data, data_len, signer->md_algo.hash,
-                                       signer->sig, signer->sig_len,
-                                       &pk->spki.pk, pk->spki.pk_algo.aliases);
-      if (ret == GRUB_ERR_NONE)
         {
-          grub_dprintf ("appendedsig",
-                        "verify signer %d signatureAlgorithm (%s), issuer ('%s'), and "
-                        "serialNumber (%s) with key PK-Algorithm (%s), issuer ('%s'), "
-                        "and serialNumber (%s) succeeded\n",
-                        i, signer->sig_algo.name, signer->issuer, signer->serial,
-                        pk->spki.pk_algo.name, pk->issuer, pk->serial);
-          return ret;
+          if (ret == GRUB_ERR_OUT_OF_MEMORY)
+            return ret;
+
+          continue;
         }
 
-      grub_dprintf ("appendedsig",
-                    "verify signer %d signatureAlgorithm (%s), issuer ('%s'), and "
-                    "serialNumber (%s) with key PK-Algorithm (%s), issuer ('%s'), "
-                    "and serialNumber (%s) failed\n",
-                    i, signer->sig_algo.name, signer->issuer, signer->serial,
-                    pk->spki.pk_algo.name, pk->issuer, pk->serial);
+      return ret;
     }
 
   return ret;
@@ -808,6 +1149,7 @@ pkcs7_free_signers (grub_pkcs7_signer_t *signers)
       grub_free (signers->serial);
       grub_free (signers->issuer);
       grub_memset (&signers->md_algo, 0x00, sizeof (grub_pkcs7_mdalgo_t));
+      grub_free (signers->signed_attrs.msg_digest);
       grub_free (signers->signed_attrs.raw);
       grub_memset (&signers->signed_attrs, 0x00, sizeof (grub_pkcs7_signedattr_t));
       grub_memset (&signers->sig_algo, 0x00, sizeof (grub_pkcs7_sigalgo_t));

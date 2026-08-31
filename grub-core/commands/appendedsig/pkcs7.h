@@ -46,6 +46,9 @@ typedef struct md_algo grub_pkcs7_mdalgo_t;
 
 struct signedattrs
 {
+  grub_uint8_t *msg_digest;
+  grub_int32_t msg_digest_len;
+  grub_int64_t signing_time;
   grub_uint8_t *raw;
   grub_int32_t raw_len;
 };
@@ -105,8 +108,7 @@ typedef grub_err_t (*grub_pkcs7_verify_t) (const grub_pkcs7_signed_data_t *pkcs7
                                            const grub_x509_cert_t *trust_certs,
                                            const grub_pkcs7_rcl_t *rcl,
                                            const grub_uint8_t *data,
-                                           const grub_size_t data_len,
-                                           bool *cert_revoked);
+                                           const grub_size_t data_len);
 
 /* Type for the pkcs7_signed_data_release function.  */
 typedef void (*grub_pkcs7_release_t) (grub_pkcs7_signed_data_t *pkcs7_signed_data);
