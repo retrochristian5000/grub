@@ -529,14 +529,26 @@ grub_diskfilter_read_node (const struct grub_diskfilter_node *node,
 
 
 static grub_err_t
-validate_segment (struct grub_diskfilter_segment *seg);
+validate_segment (struct grub_diskfilter_segment *seg, unsigned int depth);
+
+/*
+ * A logical volume's segment nodes can reference other logical volumes, and
+ * that reference is resolved by name from the (untrusted) metadata.  A crafted
+ * volume group can therefore make an LV reference itself, directly or through a
+ * chain, which would recurse until the stack overflows.  Bound the nesting to a
+ * value far above anything a real LVM stack uses.
+ */
+#define GRUB_DISKFILTER_MAX_LV_DEPTH 32
 
 static grub_err_t
-validate_lv (struct grub_diskfilter_lv *lv)
+validate_lv (struct grub_diskfilter_lv *lv, unsigned int depth)
 {
   unsigned int i;
   if (!lv)
     return grub_error (GRUB_ERR_UNKNOWN_DEVICE, "unknown volume");
+
+  if (depth > GRUB_DISKFILTER_MAX_LV_DEPTH)
+    return grub_error (GRUB_ERR_BAD_FS, "too many nested logical volumes");
 
   if (!lv->vg || lv->vg->extent_size == 0)
     return grub_error (GRUB_ERR_READ_ERROR, "invalid volume");
@@ -544,7 +556,7 @@ validate_lv (struct grub_diskfilter_lv *lv)
   for (i = 0; i < lv->segment_count; i++)
     {
       grub_err_t err;
-      err = validate_segment (&lv->segments[i]);
+      err = validate_segment (&lv->segments[i], depth);
       if (err)
 	return err;
     }
@@ -553,19 +565,19 @@ validate_lv (struct grub_diskfilter_lv *lv)
 
 
 static grub_err_t
-validate_node (const struct grub_diskfilter_node *node)
+validate_node (const struct grub_diskfilter_node *node, unsigned int depth)
 {
   /* Check whether we actually know the physical volume we want to
      read from.  */
   if (node->pv)
     return GRUB_ERR_NONE;
   if (node->lv)
-    return validate_lv (node->lv);
+    return validate_lv (node->lv, depth + 1);
   return grub_error (GRUB_ERR_UNKNOWN_DEVICE, "unknown node '%s'", node->name);
 }
 
 static grub_err_t
-validate_segment (struct grub_diskfilter_segment *seg)
+validate_segment (struct grub_diskfilter_segment *seg, unsigned int depth)
 {
   grub_err_t err;
 
@@ -609,7 +621,7 @@ validate_segment (struct grub_diskfilter_segment *seg)
   unsigned i;
   for (i = 0; i < seg->node_count; i++)
     {
-      err = validate_node (&seg->nodes[i]);
+      err = validate_node (&seg->nodes[i], depth);
       if (err)
 	return err;
     }
@@ -997,7 +1009,7 @@ grub_diskfilter_vg_register (struct grub_diskfilter_vg *vg)
     {
       grub_err_t err;
 
-      err = validate_lv(lv);
+      err = validate_lv(lv, 0);
       if (err)
 	return err;
       lv->number = lv_num++;
@@ -1338,7 +1350,21 @@ free_array (void)
 	  grub_free (lv->name);
 	  grub_free (lv->idname);
 	  for (i = 0; i < lv->segment_count; i++)
-	    grub_free (lv->segments[i].nodes);
+	    {
+	      /*
+	       * Node names are owned by the node (e.g. the LVM parser strdup()s
+	       * the stripe/mirror member names); free them too.  RAID arrays
+	       * built by grub_diskfilter_make_raid() leave name == NULL, so this
+	       * is a no-op there.
+	       */
+	      if (lv->segments[i].nodes)
+		{
+		  unsigned j;
+		  for (j = 0; j < lv->segments[i].node_count; j++)
+		    grub_free (lv->segments[i].nodes[j].name);
+		}
+	      grub_free (lv->segments[i].nodes);
+	    }
 	  grub_free (lv->segments);
 	  grub_free (lv->internal_id);
 	  grub_free (lv);
