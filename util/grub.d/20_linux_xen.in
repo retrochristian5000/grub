@@ -83,7 +83,13 @@ case x"$GRUB_FS" in
     xzfs)
 	rpool=`${grub_probe} --device ${GRUB_DEVICE} --target=fs_label 2>/dev/null || zdb -l ${GRUB_DEVICE} | awk -F \' '/ name/ { print $2 }'`
 	bootfs="`make_system_path_relative_to_its_root / | sed -e "s,@$,,"`"
-	LINUX_ROOT_DEVICE="ZFS=${rpool}${bootfs%/}"
+	# grub-probe fails on encrypted zfs pools, use zfs list as fallback
+	if [ -n "$rpool" ] && [ -n "$bootfs" ]; then
+	    LINUX_ROOT_DEVICE="ZFS=${rpool}${bootfs%/}"
+	else
+	    root_dataset=`zfs list -Ho mountpoint,name | grep '^/[[:space:]]' | tail -n1 | cut -f 2 2>/dev/null || true`
+	    LINUX_ROOT_DEVICE="ZFS=${root_dataset}"
+	fi
 	;;
 esac
 
@@ -142,10 +148,36 @@ linux_entry_xsm ()
       save_default_entry | grub_add_tab | sed "s/^/$submenu_indentation/"
   fi
 
-  if [ -z "${prepare_boot_cache}" ]; then
-    prepare_boot_cache="$(prepare_grub_to_access_device ${GRUB_DEVICE_BOOT} | grub_add_tab)"
+  # Use ELILO's generic "efifb" when it's known to be available.
+  # FIXME: We need an interface to select vesafb in case efifb can't be used.
+  if [ "x$GRUB_GFXPAYLOAD_LINUX" = x ]; then
+      echo "	load_video" | sed "s/^/$submenu_indentation/"
+      if grep -qx "CONFIG_FB_EFI=y" "${config}" 2> /dev/null \
+	  && grep -qx "CONFIG_VT_HW_CONSOLE_BINDING=y" "${config}" 2> /dev/null; then
+	  echo '	if [ "x$grub_platform" = xefi ]; then' | sed "s/^/$submenu_indentation/"
+	  echo "		set gfxpayload=keep" | sed "s/^/$submenu_indentation/"
+	  echo '	fi' | sed "s/^/$submenu_indentation/"
+      fi
+  else
+      if [ "x$GRUB_GFXPAYLOAD_LINUX" != xtext ]; then
+	  echo "	load_video" | sed "s/^/$submenu_indentation/"
+      fi
+      echo "	set gfxpayload=$GRUB_GFXPAYLOAD_LINUX" | sed "s/^/$submenu_indentation/"
   fi
-  printf '%s\n' "${prepare_boot_cache}" | sed "s/^/$submenu_indentation/"
+
+  echo "	insmod gzio" | sed "s/^/$submenu_indentation/"
+
+  if [ x$dirname = x/ ]; then
+    if [ -z "${prepare_root_cache}" ]; then
+      prepare_root_cache="$(prepare_grub_to_access_device ${GRUB_DEVICE} | grub_add_tab)"
+    fi
+    printf '%s\n' "${prepare_root_cache}" | sed "s/^/$submenu_indentation/"
+  else
+    if [ -z "${prepare_boot_cache}" ]; then
+      prepare_boot_cache="$(prepare_grub_to_access_device ${GRUB_DEVICE_BOOT} | grub_add_tab)"
+    fi
+    printf '%s\n' "${prepare_boot_cache}" | sed "s/^/$submenu_indentation/"
+  fi
   xmessage="$(gettext_printf "Loading Xen %s ..." ${entry_xen_version})"
   lmessage="$(gettext_printf "Loading Linux %s ..." ${version})"
   sed "s/^/$submenu_indentation/" << EOF
@@ -221,6 +253,7 @@ for i in /boot/xen*; do
     if grub_file_is_not_garbage "$i" && file_is_not_xen_garbage "$i" ; then xen_list="$xen_list $i" ; fi
 done
 prepare_boot_cache=
+prepare_root_cache=
 boot_device_id=
 
 title_correction_code=
