@@ -33,9 +33,15 @@
 #include <filevercmp.h>
 
 #ifdef GRUB_MACHINE_EFI
+#include <grub/charset.h>
 #include <grub/efi/efi.h>
 #include <grub/efi/disk.h>
 #include <grub/efi/pe32.h>
+
+static const grub_guid_t bli_vendor_guid = GRUB_EFI_VENDOR_BOOT_LOADER_INTERFACE_GUID;
+
+#define GRUB_BLSUKI_ENTRIES_BLS "blsuki_entries_bls"
+#define GRUB_BLSUKI_ENTRIES_UKI "blsuki_entries_uki"
 #endif
 
 #ifdef GRUB_MACHINE_EMU
@@ -245,6 +251,42 @@ blsuki_get_val (grub_blsuki_entry_t *entry, const char *keyname, int *last)
   return ret;
 }
 
+/* Return the tries left of an entry with boot counting enabled.
+   When boot counting is disabled, return -1. */
+static long
+tries_left (const char *filename)
+{
+  char *tries_left_str;
+  long ret = -1;
+  char *str = grub_strdup (filename);
+
+  if (str == NULL)
+    return -1;
+
+  /* Search for the start of the tries left, as per boot assessment */
+  tries_left_str = grub_strrchr (str, '+');
+
+  if (tries_left_str != NULL)
+    {
+      const char *end;
+      long tries;
+
+      ++tries_left_str;
+      tries = grub_strtol (tries_left_str, (const char **) &end, 10);
+
+      if (grub_errno == GRUB_ERR_NONE)
+	{
+	  if (*end == '-' || *end == '.')
+	    ret = tries;
+	}
+      else
+	grub_errno = GRUB_ERR_NONE;
+    }
+
+  grub_free (str);
+  return ret;
+}
+
 /*
  * Add a new grub_blsuki_entry_t struct to the entries list and sort it's
  * position on the list.
@@ -253,7 +295,7 @@ static grub_err_t
 blsuki_add_entry (grub_blsuki_entry_t *entry)
 {
   grub_blsuki_entry_t *e, *last = NULL;
-  int rc;
+  int rc, t1, t2;
 
   if (entries == NULL)
     {
@@ -267,6 +309,14 @@ blsuki_add_entry (grub_blsuki_entry_t *entry)
       rc = filevercmp (entry->filename, e->filename);
       if (rc == 0)
 	return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("duplicate file: `%s'"), entry->filename);
+
+      /* Entries with 0 tries left should be put below the rest */
+      t1 = tries_left (entry->filename);
+      t2 = tries_left (e->filename);
+      if (t2 == 0 && t1 != 0)
+	rc = 1;
+      else if (t2 != 0 && t1 == 0)
+	rc = -1;
 
       if (rc > 0)
 	{
@@ -963,6 +1013,7 @@ bls_create_entry (grub_blsuki_entry_t *entry)
   char *initrd_cmd = NULL;
   char *dt_cmd = NULL;
   char *id = entry->filename;
+  char *id_dup = NULL;
   grub_size_t id_len;
   char *hotkey = NULL;
   char *users = NULL;
@@ -983,6 +1034,52 @@ bls_create_entry (grub_blsuki_entry_t *entry)
   id_len = grub_strlen (id);
   if (id_len >= BLS_EXT_LEN && grub_strcmp (id + id_len - BLS_EXT_LEN, ".conf") == 0)
     id[id_len - BLS_EXT_LEN] = '\0';
+  id_len = grub_strlen (id);
+  /*
+   * The menuentry ID should have the boot assessemnt counters removed, to
+   * canonicalize that default entry can be correctly matched.
+   */
+  char *tries = grub_strrchr (id, '+');
+  if (tries != NULL)
+    {
+      char *n;
+      const char *n_end = NULL;
+      char *done = grub_strrchr (tries, '-');
+      if (done != NULL)
+	n = grub_strndup (tries + 1, done - tries - 1);
+      else
+	n = grub_strdup (tries + 1);
+      if (n == NULL)
+	goto finish;
+      grub_error_push ();
+      grub_strtol (n, &n_end, 10);
+      switch (grub_errno)
+	{
+	case GRUB_ERR_NONE:
+	  grub_error_pop ();
+	  if (n_end && n_end != n && *n_end == '\0')
+	    {
+	      id_dup = grub_strdup (id);
+	      if (id_dup == NULL)
+		{
+		  grub_free (n);
+		  goto finish;
+		}
+	      grub_strrchr (id_dup, '+')[0] = '\0';
+	    }
+	  break;
+	default:
+	  grub_error_pop ();
+	  break;
+	}
+      grub_free (n);
+    }
+
+  if (id_dup != NULL)
+    {
+      id = id_dup;
+      id_len = grub_strlen (id);
+    }
 
   title = blsuki_get_val (entry, "title", NULL);
   version = blsuki_get_val (entry, "version", NULL);
@@ -1044,6 +1141,7 @@ bls_create_entry (grub_blsuki_entry_t *entry)
   grub_free (args);
   grub_free (argv);
   grub_free (src);
+  grub_free (id_dup);
 }
 
 #ifdef GRUB_MACHINE_EFI
@@ -1404,6 +1502,219 @@ blsuki_is_default_entry (const char *def_entry, grub_blsuki_entry_t *entry, int 
   return false;
 }
 
+#ifdef GRUB_MACHINE_EFI
+/* Set LoaderEntries for uki and blscfg generated entries */
+static grub_err_t
+set_bli_loader_entries (enum blsuki_cmd_type cmd_type)
+{
+  grub_blsuki_entry_t *entry = NULL;
+  grub_size_t size = 0, remaining_size, len, written, prev_entries_size = 0, len16;
+  grub_efi_char16_t *prev_entries_start = NULL;
+  grub_size_t prev_entries_start_size = 0;
+  grub_efi_char16_t *efi_entries = NULL, *prev_entries = NULL, *p = NULL;
+  char *boot_counting_idx, *prev_entry;
+  const char* env = NULL;
+  grub_efi_status_t status;
+  int rc;
+
+  FOR_BLSUKI_ENTRIES (entry)
+    {
+      if (entry->visible)
+	{
+	  /* Calculate the size of LoaderEntries string */
+	  len = grub_strlen (entry->filename);
+	  /* Skip boot counting if found */
+	  boot_counting_idx = grub_strrchr(entry->filename, '+');
+	  if (boot_counting_idx != NULL)
+	    len = boot_counting_idx - entry->filename;
+	  /* Skip ".conf" extension if found */
+	  else if (len > BLS_EXT_LEN
+	      && grub_strcmp (entry->filename + len - BLS_EXT_LEN, ".conf") == 0)
+	    len -= BLS_EXT_LEN;
+	  else if (len > UKI_EXT_LEN
+	      && grub_strcmp (entry->filename + len - UKI_EXT_LEN, ".efi") == 0)
+	    len -= UKI_EXT_LEN;
+
+	  size += len + 1;
+	}
+    }
+
+  /* When calling blscfg command, there might be entries generated by uki command,
+     and viceversa. Use GRUB_BLSUKI_ENTRIES_BLS and GRUB_BLSUKI_ENTRIES_UKI env variables
+     to check if the current value of LoaderEntries should be appended to the new one */
+  if (cmd_type == BLSUKI_BLS_CMD)
+    {
+      env = grub_env_get (GRUB_BLSUKI_ENTRIES_UKI);
+    } else if (cmd_type == BLSUKI_UKI_CMD) {
+      env = grub_env_get (GRUB_BLSUKI_ENTRIES_BLS);
+    }
+  if (env && grub_strcmp (env, "1") == 0)
+    {
+      status = grub_efi_get_variable ("LoaderEntries",
+				      &bli_vendor_guid,
+				      &prev_entries_start_size,
+				      (void**) &prev_entries_start);
+      /* Get the value of the other generated entries */
+      if (status != GRUB_EFI_SUCCESS || prev_entries_start_size == 0)
+	{
+	  prev_entries_start = NULL;
+	  prev_entries_start_size = 0;
+	}
+    }
+  efi_entries = grub_malloc (size * sizeof (grub_efi_char16_t) + prev_entries_start_size);
+  if (efi_entries == NULL)
+    return grub_errno;
+
+  prev_entries = prev_entries_start;
+  prev_entries_size = prev_entries_start_size;
+  p = efi_entries;
+  remaining_size = size + (prev_entries_start_size / sizeof (*efi_entries));
+  /* Create a null separated list of all entries (with the extension removed) */
+  FOR_BLSUKI_ENTRIES (entry)
+    {
+      if (entry->visible)
+	{
+	  len = grub_strlen (entry->filename);
+
+	  boot_counting_idx = grub_strrchr(entry->filename, '+');
+	  if (boot_counting_idx != NULL)
+	    len = boot_counting_idx - entry->filename;
+	  else if ((len > BLS_EXT_LEN)
+	      && grub_strcmp (entry->filename + len - BLS_EXT_LEN, ".conf") == 0)
+	    len -= BLS_EXT_LEN;
+	  else if ((len > UKI_EXT_LEN)
+	      && grub_strcmp (entry->filename + len - UKI_EXT_LEN, ".efi") == 0)
+	    len -= UKI_EXT_LEN;
+
+	  if (remaining_size < len + 1)
+	    {
+	      grub_dprintf ("blsuki", "LoaderEntries buffer too small\n");
+	      break;
+	    }
+
+	  if (prev_entries_size != 0 && prev_entries)
+	    {
+	      do {
+		grub_size_t prev_entry_size;
+		grub_size_t prev_entries_size16 = prev_entries_size / sizeof (*prev_entries);
+
+		len16 = 0;
+		/*
+		 * LoaderEntries comes from EFI variable storage, so it is only
+		 * trusted up to prev_entries_size16 UTF-16 code units. Bound
+		 * the scan in case a malformed variable is missing a
+		 * terminator.
+		 */
+		while (len16 < prev_entries_size16 && prev_entries[len16] != '\0')
+		    len16++;
+
+		/*
+		 * If we reached the end of the buffer without finding a null
+		 * terminator, the variable is malformed and we should bail
+		 * instead of risking an out-of-bounds read.
+		 */
+		if (len16 == prev_entries_size16)
+		  {
+		    grub_free (prev_entries_start);
+		    grub_free (efi_entries);
+		    return grub_error (GRUB_ERR_BAD_ARGUMENT, "malformed LoaderEntries variable");
+		  }
+
+		if (grub_mul (len16, GRUB_MAX_UTF8_PER_UTF16, &prev_entry_size) ||
+		    grub_add (prev_entry_size, 1, &prev_entry_size))
+		  {
+		    grub_free (prev_entries_start);
+		    grub_free (efi_entries);
+		    return grub_error (GRUB_ERR_OUT_OF_RANGE,
+				       "LoaderEntries entry is too large");
+		  }
+
+		prev_entry = grub_malloc (prev_entry_size);
+		if (prev_entry == NULL)
+		  {
+		    grub_free (prev_entries_start);
+		    grub_free (efi_entries);
+		    return grub_errno;
+		  }
+
+		*grub_utf16_to_utf8 ((grub_uint8_t*) prev_entry, prev_entries, len16) = '\0';
+		rc = filevercmp (prev_entry, entry->filename);
+		if (rc == 0)
+		  {
+		    grub_free (prev_entry);
+		    grub_free (prev_entries_start);
+		    grub_free (efi_entries);
+		    return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("duplicate file: `%s'"), entry->filename);
+		  }
+
+		if (rc > 0)
+		  {
+		    grub_memcpy (p, prev_entries, len16 * sizeof (*prev_entries));
+		    p += len16;
+		    *p++ = (grub_efi_char16_t) '\0';
+		    remaining_size -= len16 + 1;
+		    prev_entries += len16 + 1;
+		    prev_entries_size -= (len16 + 1) * sizeof (*prev_entries);
+		  }
+		grub_free (prev_entry);
+	      } while (prev_entries_size > 0 && rc > 0);
+	    }
+
+	  written = grub_utf8_to_utf16 (p, remaining_size,
+					(grub_uint8_t*) entry->filename, len, NULL);
+	  p += written;
+	  *p++ = (grub_efi_char16_t) '\0';
+	  remaining_size -= written + 1;
+	}
+    }
+
+    /*
+     * Append any entries left unconsumed in prev_entries after the ordered
+     * merge above. Previous entries are only emitted immediately when they
+     * sort before the current new entry; otherwise they remain pending until
+     * here.
+     */
+    if (prev_entries_size != 0 && prev_entries != NULL)
+      {
+	grub_size_t remaining_entries_size;
+
+	remaining_entries_size = prev_entries_size / sizeof (*prev_entries);
+	/*
+	 * remaining_size is tracked in UTF-16 code units, so compare it
+	 * against the number of UTF-16 elements left in the previous buffer.
+	 */
+	if (remaining_size < remaining_entries_size)
+	  {
+	    grub_free (prev_entries_start);
+	    grub_free (efi_entries);
+	    return grub_error (
+		GRUB_ERR_OUT_OF_RANGE,
+		"LoaderEntries buffer too small for previous entries");
+	  }
+
+	grub_memcpy (p, prev_entries, prev_entries_size);
+	p += remaining_entries_size;
+	remaining_size -= remaining_entries_size;
+	prev_entries_size = 0;
+      }
+
+  status = grub_efi_set_variable_with_attributes ("LoaderEntries", &bli_vendor_guid,
+					 efi_entries,
+					 (p - efi_entries) * sizeof (*efi_entries),
+					 GRUB_EFI_VARIABLE_BOOTSERVICE_ACCESS |
+					 GRUB_EFI_VARIABLE_RUNTIME_ACCESS);
+  /* Record that we set the generated entries by this command to LoaderEntries */
+  if (cmd_type == BLSUKI_BLS_CMD)
+    grub_env_set (GRUB_BLSUKI_ENTRIES_BLS, "1");
+  else if (cmd_type == BLSUKI_UKI_CMD)
+    grub_env_set (GRUB_BLSUKI_ENTRIES_UKI, "1");
+  grub_free (efi_entries);
+  grub_free (prev_entries_start);
+
+  return status;
+}
+#endif
+
 /*
  * This function creates a GRUB boot menu entry for each BLS or UKI  entry in
  * the entries list.
@@ -1439,6 +1750,10 @@ blsuki_create_entries (bool show_default, bool show_non_default, char *entry_id,
 
       idx++;
     }
+
+#ifdef GRUB_MACHINE_EFI
+  set_bli_loader_entries (cmd_type);
+#endif
 
   return GRUB_ERR_NONE;
 }
