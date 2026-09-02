@@ -134,7 +134,7 @@ grub_addr_t grub_ieee1275_original_stack;
 #define RADIX_GTSE_ENABLED   0x40
 
 void
-grub_exit (void)
+grub_exit (int rc __attribute__((unused)))
 {
   grub_ieee1275_exit ();
 }
