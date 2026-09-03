@@ -316,6 +316,28 @@ for i in "${grub_mkconfig_dir}"/* ; do
   esac
 done
 
+sync_fs_journal () {
+  if ! command -v fsfreeze > /dev/null 2>&1; then
+    return 0
+  fi
+
+  boot_fs="$GRUB_FS"
+  grub_cfg_rel_path="/boot/@PACKAGE@/grub.cfg"
+  mount_point="/"
+
+  if test "x$GRUB_DEVICE" != "x$GRUB_DEVICE_BOOT"; then
+    boot_fs="`${grub_probe} --device "${GRUB_DEVICE_BOOT}" --target=fs 2> /dev/null || echo unknown`"
+    grub_cfg_rel_path="/@PACKAGE@/grub.cfg"
+    mount_point="/boot"
+  fi
+  if test "x$boot_fs" = "xxfs" -o "x$boot_fs" = "xext2" &&
+     test "x${grub_cfg}" != "x" -a "x`make_system_path_relative_to_its_root "$grub_cfg"`" = "x${grub_cfg_rel_path}"; then
+    trap '' HUP INT TERM
+    fsfreeze --freeze "${mount_point}" && fsfreeze --unfreeze "${mount_point}"
+    trap - HUP INT TERM
+  fi
+} >&2
+
 if test "x${grub_cfg}" != "x" ; then
   if ! ${grub_script_check} ${grub_cfg}.new; then
     # TRANSLATORS: %s is replaced by filename
@@ -332,6 +354,7 @@ and /etc/grub.d/* files or please file a bug report with
     cat ${grub_cfg}.new > ${grub_cfg}
     umask $oldumask
     rm -f ${grub_cfg}.new
+    sync_fs_journal || true
   fi
 fi
 
