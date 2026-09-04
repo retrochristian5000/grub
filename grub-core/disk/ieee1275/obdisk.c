@@ -630,6 +630,34 @@ grub_obdisk_read (grub_disk_t disk, grub_disk_addr_t sector,
   return GRUB_ERR_NONE;
 }
 
+static grub_err_t
+grub_obdisk_write (grub_disk_t disk, grub_disk_addr_t sector,
+		   grub_size_t size, const char *src)
+{
+  struct disk_dev *dev;
+  grub_ssize_t result = 0;
+  grub_err_t err;
+
+  err = obdisk_prepare (disk, sector, &dev);
+
+  if (err != GRUB_ERR_NONE)
+    return err;
+
+  grub_ieee1275_write (dev->ihandle, src, size << disk->log_sector_size,
+                       &result);
+
+  if (result != (grub_ssize_t) (size << disk->log_sector_size))
+    {
+      dev->opened = 0;
+      return grub_error (GRUB_ERR_WRITE_ERROR, N_("failure writing sector 0x%llx "
+                                                  "to `%s'"),
+                         (unsigned long long) sector,
+                         disk->name);
+    }
+
+  return GRUB_ERR_NONE;
+}
+
 static void
 grub_obdisk_close (grub_disk_t disk)
 {
@@ -1119,6 +1147,7 @@ static struct grub_disk_dev grub_obdisk_dev =
     .disk_open    = grub_obdisk_open,
     .disk_close   = grub_obdisk_close,
     .disk_read    = grub_obdisk_read,
+    .disk_write   = grub_obdisk_write,
   };
 
 void
