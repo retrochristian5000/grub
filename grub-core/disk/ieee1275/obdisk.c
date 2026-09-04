@@ -393,6 +393,20 @@ canonicalise_disk (const char *devname)
   if (grub_strstr (canon, "virtual-devices"))
     return canon;
 
+  /*
+   * A name with no unit address does not describe a disk behind a
+   * controller, so there is no parent to derive: get_parent_devname() would
+   * hand back the device path itself and the firmware would be asked to
+   * open a device as though it were a controller. Where the device is not
+   * present that open fails, but only after a timeout of several seconds
+   * per name - the two IDE aliases of a Sun Fire V240 with an empty drive
+   * cost about 35 seconds of every enumeration. Where it is present the
+   * open succeeds instead and the device is recorded as a controller of
+   * itself.
+   */
+  if (grub_strstr (canon, IEEE1275_DISK_ALIAS) == NULL)
+    return canon;
+
   parent = get_parent_devname (canon);
 
   if (parent == NULL)
@@ -412,17 +426,6 @@ canonicalise_disk (const char *devname)
 
       unit_address = grub_strstr (canon, IEEE1275_DISK_ALIAS);
       unit_address += grub_strlen (IEEE1275_DISK_ALIAS);
-
-      if (unit_address == NULL)
-        {
-          /*
-           * This should not be possible, but return the canonical name for
-           * the non-disk block device.
-           */
-          grub_free (parent);
-          return (canon);
-        }
-
       real_unit_address = canonicalise_4cell_ua (op->ihandle, unit_address);
 
       if (real_unit_address == NULL)
