@@ -155,9 +155,9 @@ linux_entry_xsm ()
         else
             xen_rm_opts="no-real-mode edd=off"
         fi
-	${xen_loader}	${rel_xen_dirname}/${xen_basename} placeholder ${xen_args} \${xen_rm_opts}
+	${xen_loader}	${rel_xen_dirname}/${xen_basename} ${xen_args} \${xen_rm_opts}
 	echo	'$(echo "$lmessage" | grub_quote)'
-	${module_loader}	${rel_dirname}/${basename} placeholder root=${linux_root_device_thisversion} ro ${args}
+	${module_loader}	${rel_dirname}/${basename} root=${linux_root_device_thisversion} ro ${args}
 EOF
   if test -n "${initrd}" ; then
     # TRANSLATORS: ramdisk isn't identifier. Should be translated.
