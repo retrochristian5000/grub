@@ -534,18 +534,61 @@ add_disk (const char *path)
 }
 
 static grub_err_t
-grub_obdisk_read (grub_disk_t disk, grub_disk_addr_t sector,
-		  grub_size_t size, char *dest)
+ensure_open (struct disk_dev *dev, const char *name)
 {
-  grub_err_t ret = GRUB_ERR_NONE;
+  grub_ieee1275_ihandle_t ihandle = 0;
+
+  if (dev->opened != 0)
+    return GRUB_ERR_NONE;
+
+  if (dev->raw_name != NULL)
+    grub_ieee1275_open (dev->raw_name, &ihandle);
+  else
+    grub_ieee1275_open (dev->name, &ihandle);
+
+  if (ihandle == 0)
+    {
+      grub_printf ("Can't open device %s\n", name);
+      return grub_error (GRUB_ERR_UNKNOWN_DEVICE, "can't open device %s", name);
+    }
+
+  dev->block_size = grub_ieee1275_get_block_size (ihandle);
+  dev->num_blocks = grub_ieee1275_num_blocks (ihandle);
+
+  if (dev->num_blocks == 0)
+    dev->num_blocks = grub_ieee1275_num_blocks64 (ihandle);
+
+  if (dev->num_blocks == 0)
+    dev->num_blocks = GRUB_DISK_SIZE_UNKNOWN;
+
+  if (dev->block_size != 0)
+    dev->log_sector_size = grub_log2ull (dev->block_size);
+  else
+    dev->log_sector_size = 9;
+
+  dev->ihandle = ihandle;
+  dev->opened = 1;
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
+obdisk_prepare (grub_disk_t disk, grub_disk_addr_t sector,
+                struct disk_dev **devp)
+{
   struct disk_dev *dev;
   unsigned long long pos;
   grub_ssize_t result = 0;
+  grub_err_t err;
 
   if (disk->data == NULL)
     return grub_error (GRUB_ERR_BAD_DEVICE, "invalid disk data");
 
-  dev = (struct disk_dev *)disk->data;
+  dev = (struct disk_dev *) disk->data;
+  err = ensure_open (dev, disk->name);
+
+  if (err != GRUB_ERR_NONE)
+    return err;
+
   pos = sector << disk->log_sector_size;
   grub_ieee1275_seek (dev->ihandle, pos, &result);
 
@@ -556,6 +599,22 @@ grub_obdisk_read (grub_disk_t disk, grub_disk_addr_t sector,
                          (long long) sector);
     }
 
+  *devp = dev;
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
+grub_obdisk_read (grub_disk_t disk, grub_disk_addr_t sector,
+		  grub_size_t size, char *dest)
+{
+  struct disk_dev *dev;
+  grub_ssize_t result = 0;
+  grub_err_t err;
+
+  err = obdisk_prepare (disk, sector, &dev);
+
+  if (err != GRUB_ERR_NONE)
+    return err;
   grub_ieee1275_read (dev->ihandle, dest, size << disk->log_sector_size,
                       &result);
 
@@ -567,7 +626,8 @@ grub_obdisk_read (grub_disk_t disk, grub_disk_addr_t sector,
                          (unsigned long long) sector,
                          disk->name);
     }
-  return ret;
+
+  return GRUB_ERR_NONE;
 }
 
 static void
@@ -1024,8 +1084,8 @@ grub_obdisk_iterate (grub_disk_dev_iterate_hook_t hook, void *hook_data,
 static grub_err_t
 grub_obdisk_open (const char *name, grub_disk_t disk)
 {
-  grub_ieee1275_ihandle_t ihandle = 0;
   struct disk_dev *dev = NULL;
+  grub_err_t err;
 
   if (grub_strncmp (name, IEEE1275_DEV, sizeof (IEEE1275_DEV) - 1) != 0)
     return grub_error (GRUB_ERR_UNKNOWN_DEVICE, "not IEEE1275 device");
@@ -1038,36 +1098,10 @@ grub_obdisk_open (const char *name, grub_disk_t disk)
       return grub_error (GRUB_ERR_UNKNOWN_DEVICE, "%s", name);
     }
 
-  if (dev->opened == 0)
-    {
-      if (dev->raw_name != NULL)
-        grub_ieee1275_open (dev->raw_name, &ihandle);
-      else
-        grub_ieee1275_open (dev->name, &ihandle);
+  err = ensure_open (dev, name);
 
-      if (ihandle == 0)
-        {
-          grub_printf ("Can't open device %s\n", name);
-          return grub_error (GRUB_ERR_UNKNOWN_DEVICE, "can't open device %s", name);
-        }
-
-      dev->block_size = grub_ieee1275_get_block_size (ihandle);
-      dev->num_blocks = grub_ieee1275_num_blocks (ihandle);
-
-      if (dev->num_blocks == 0)
-        dev->num_blocks = grub_ieee1275_num_blocks64 (ihandle);
-
-      if (dev->num_blocks == 0)
-        dev->num_blocks = GRUB_DISK_SIZE_UNKNOWN;
-
-      if (dev->block_size != 0)
-        dev->log_sector_size = grub_log2ull (dev->block_size);
-      else
-        dev->log_sector_size = 9;
-
-      dev->ihandle = ihandle;
-      dev->opened = 1;
-    }
+  if (err != GRUB_ERR_NONE)
+    return err;
 
   disk->total_sectors = dev->num_blocks;
   disk->id = dev->ihandle;
