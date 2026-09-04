@@ -1143,10 +1143,29 @@ grub_obdisk_iterate (grub_disk_dev_iterate_hook_t hook, void *hook_data,
   struct disk_dev *dev;
   const char *name;
 
+  /*
+   * Enumerating is expensive: every controller is opened and every target on
+   * it probed, which is thirty firmware calls on a two channel SCSI
+   * controller and sixty four decode-unit and encode-unit calls on a SAS
+   * one. This is called once for each consumer of the device list, and some
+   * of them iterate repeatedly - a search without a hint sweeps every
+   * device, and diskfilter walks them all again looking for members - so
+   * enumerating on every call cost minutes of firmware traffic for a single
+   * search on a Sun Fire V240.
+   *
+   * Enumerating on GRUB_DISK_PULL_RESCAN instead, so that a device
+   * appearing mid-session would still be found, was tried and brought the
+   * cost straight back: every consumer is offered each pull level in turn.
+   *
+   * A device that appears mid-session is therefore not picked up by an
+   * iteration. find_grub_devpath() still enumerates when a name cannot be
+   * found, so one asked for by name is found as before.
+   */
   if (pull != GRUB_DISK_PULL_NONE)
     return 0;
 
-  enumerate_devices ();
+  if (disks_enumerated == 0)
+    enumerate_devices ();
 
   FOR_LIST_ELEMENTS (dev, disk_devs)
     {
