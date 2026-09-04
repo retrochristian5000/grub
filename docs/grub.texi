@@ -3423,6 +3423,7 @@ These variables have special meaning to GRUB.
 * net_default_ip::
 * net_default_mac::
 * net_default_server::
+* obdisk_single_instance::
 * pager::
 * prefix::
 * pxe_default_server::
@@ -3882,6 +3883,24 @@ The default is the value of @samp{color_normal} (@pxref{color_normal}).
 
 @xref{Network}.
 
+
+@node obdisk_single_instance
+@subsection obdisk_single_instance
+
+Set this on a sparc64 machine whose firmware allows only one open instance
+per disk controller. Such firmware faults, leaving the machine at the
+OpenBoot prompt reporting @samp{Fast Data Access MMU Miss}, as soon as GRUB
+refers to a second disk on a controller it already has one open on. Setting
+this variable to @samp{1} makes the @samp{obdisk} driver release what it
+holds on a controller before opening something else on it, at the cost of
+opening devices again as they are used.
+
+This is off by default: firmware that does not have the limit cannot be told
+apart from firmware that does, because exceeding the limit faults the machine
+rather than returning an error, and opening a device again is slow on
+machines that never needed it. Recognised values are @samp{1}, @samp{on},
+@samp{yes} and @samp{true}; anything else, including leaving it unset, leaves
+the behaviour unchanged.
 
 @node pager
 @subsection pager

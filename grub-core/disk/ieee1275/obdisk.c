@@ -46,6 +46,7 @@ struct disk_dev
   grub_uint64_t           num_blocks;
   unsigned int            log_sector_size;
   grub_uint32_t           opened;
+  grub_uint32_t           dirty;
   grub_uint32_t           valid;
   grub_uint32_t           boot_dev;
 };
@@ -83,6 +84,121 @@ static const char *block_blacklist[] = {
 };
 
 #define STRCMP(a, b) ((a) && (b) && (grub_strcmp (a, b) == 0))
+
+/* Release a device, so that it is opened again the next time it is used. */
+static void
+close_disk (struct disk_dev *dev)
+{
+  if (dev->opened == 0)
+    return;
+
+  grub_ieee1275_close (dev->ihandle);
+  dev->ihandle = 0;
+  dev->opened = 0;
+  dev->dirty = 0;
+
+  /*
+   * A disk is identified to the block cache by its instance handle, and the
+   * firmware reuses handle values, so an entry cached before this device was
+   * released could be matched against a different device that is later given
+   * the same handle. Drop the cache rather than serve one disk's sectors as
+   * another's.
+   */
+  grub_disk_cache_invalidate_all ();
+}
+
+/* Release a controller, so that open_parent() opens it again when needed. */
+static void
+close_parent (struct parent_dev *op)
+{
+  if (op->ihandle == 0)
+    return;
+
+  grub_ieee1275_close (op->ihandle);
+  op->ihandle = 0;
+}
+
+/* Length of the controller part of a device name, without its unit address. */
+static grub_size_t
+controller_len (const char *name)
+{
+  const char *unit = grub_strstr (name, IEEE1275_DISK_ALIAS);
+
+  return (unit != NULL) ? (grub_size_t) (unit - name) : grub_strlen (name);
+}
+
+static int
+single_instance_wanted (void)
+{
+  const char *value = grub_env_get ("obdisk_single_instance");
+
+  if (value == NULL)
+    return 0;
+
+  return (grub_strcmp (value, "1") == 0 || grub_strcmp (value, "on") == 0
+          || grub_strcmp (value, "yes") == 0
+          || grub_strcmp (value, "true") == 0);
+}
+
+/*
+ * Some firmware allows only one open instance per disk controller, counting
+ * both an open target and the controller node itself. Opening a second one
+ * faults inside the firmware driver and the machine drops to the OpenBoot
+ * prompt reporting "Fast Data Access MMU Miss". This has been seen on the
+ * OpenBoot 4.30 era LSI SCSI controller of a Sun Fire V240 and reported on a
+ * Sun Fire T2000, while the later OpenBoot of an UltraSPARC T4 has no such
+ * limit. Opening and closing the same devices one after another is fine.
+ *
+ * Since obdisk otherwise keeps every device open, booting from one disk and
+ * then referring to another on the same controller is enough to reach the
+ * fault: a bare "ls" does it, and so does the search in a generated
+ * grub.cfg once its hints have been exhausted.
+ *
+ * Release what is held on one controller before opening something else on
+ * it. Devices on other controllers are left alone; they do not conflict,
+ * and closing them would mean reopening a controller every time GRUB moved
+ * between them.
+ *
+ * This is not done unless asked for, because closing is not free: opening a
+ * SAS target on an UltraSPARC T4 takes about ten seconds, so releasing a
+ * disk that GRUB is about to want again turned a device scan of five
+ * seconds into minutes there. The firmware cannot be asked whether it has
+ * the limit - exceeding it faults the machine rather than returning an
+ * error - so a machine that needs this sets obdisk_single_instance in its
+ * own grub.cfg, which it can do because booting already works: the hints in
+ * a generated configuration keep the search from reaching a second disk.
+ */
+static void
+close_controller_users (const char *controller, struct disk_dev *keep_disk,
+                        struct parent_dev *keep_parent)
+{
+  grub_size_t clen;
+  struct disk_dev *dev;
+  struct parent_dev *op;
+
+  if (single_instance_wanted () == 0)
+    return;
+
+  clen = controller_len (controller);
+
+  FOR_LIST_ELEMENTS (dev, disk_devs)
+    if (dev != keep_disk && dev->opened != 0
+        && controller_len (dev->name) == clen
+        && grub_memcmp (dev->name, controller, clen) == 0)
+      {
+        grub_dprintf ("obdisk", "closing disk %s\n", dev->name);
+        close_disk (dev);
+      }
+
+  FOR_LIST_ELEMENTS (op, parent_devs)
+    if (op != keep_parent && op->ihandle != 0
+        && grub_strlen (op->name) == clen
+        && grub_memcmp (op->name, controller, clen) == 0)
+      {
+        grub_dprintf ("obdisk", "closing controller %s\n", op->name);
+        close_parent (op);
+      }
+}
 
 static char *
 strip_ob_partition (char *path)
@@ -260,6 +376,7 @@ open_new_parent (const char *parent)
   if (op == NULL)
     return NULL;
 
+  close_controller_users (parent, NULL, NULL);
   grub_ieee1275_open (parent, &ihandle);
 
   if (ihandle == 0)
@@ -274,6 +391,7 @@ open_new_parent (const char *parent)
     {
       grub_error (GRUB_ERR_BAD_DEVICE, "unable to get parent %s", parent);
       grub_print_error ();
+      grub_ieee1275_close (ihandle);
       free_parent_dev (op);
       return NULL;
     }
@@ -308,6 +426,22 @@ open_parent (const char *parent)
 
       if (op != NULL)
         grub_list_push (GRUB_AS_LIST_P (&parent_devs), GRUB_AS_LIST (op));
+    }
+  else if (op->ihandle == 0)
+    {
+      grub_ieee1275_ihandle_t ihandle = 0;
+
+      close_controller_users (parent, NULL, op);
+      grub_ieee1275_open (parent, &ihandle);
+
+      if (ihandle == 0)
+        {
+          grub_error (GRUB_ERR_BAD_DEVICE, "unable to reopen %s", parent);
+          grub_print_error ();
+          return NULL;
+        }
+
+      op->ihandle = ihandle;
     }
 
   return op;
@@ -369,6 +503,20 @@ canonicalise_disk (const char *devname)
   if (grub_strstr (canon, "virtual-devices"))
     return canon;
 
+  /*
+   * A name with no unit address does not describe a disk behind a
+   * controller, so there is no parent to derive: get_parent_devname() would
+   * hand back the device path itself and the firmware would be asked to
+   * open a device as though it were a controller. Where the device is not
+   * present that open fails, but only after a timeout of several seconds
+   * per name - the two IDE aliases of a Sun Fire V240 with an empty drive
+   * cost about 35 seconds of every enumeration. Where it is present the
+   * open succeeds instead and the device is recorded as a controller of
+   * itself.
+   */
+  if (grub_strstr (canon, IEEE1275_DISK_ALIAS) == NULL)
+    return canon;
+
   parent = get_parent_devname (canon);
 
   if (parent == NULL)
@@ -388,17 +536,6 @@ canonicalise_disk (const char *devname)
 
       unit_address = grub_strstr (canon, IEEE1275_DISK_ALIAS);
       unit_address += grub_strlen (IEEE1275_DISK_ALIAS);
-
-      if (unit_address == NULL)
-        {
-          /*
-           * This should not be possible, but return the canonical name for
-           * the non-disk block device.
-           */
-          grub_free (parent);
-          return (canon);
-        }
-
       real_unit_address = canonicalise_4cell_ua (op->ihandle, unit_address);
 
       if (real_unit_address == NULL)
@@ -416,6 +553,7 @@ canonicalise_disk (const char *devname)
       if (grub_add (grub_strlen (op->name), sizeof (IEEE1275_DISK_ALIAS), &real_unit_str_len) ||
 	  grub_add (real_unit_str_len, grub_strlen (real_unit_address), &real_unit_str_len))
 	{
+	  grub_free (real_unit_address);
 	  grub_free (parent);
 	  grub_error (GRUB_ERR_OUT_OF_RANGE, N_("overflow detected while obtaining size of canonical name"));
 	  grub_print_error ();
@@ -425,6 +563,7 @@ canonicalise_disk (const char *devname)
       real_canon = grub_malloc (real_unit_str_len);
       if (real_canon == NULL)
 	{
+	  grub_free (real_unit_address);
 	  grub_free (parent);
 	  grub_print_error ();
 	  return NULL;
@@ -433,6 +572,7 @@ canonicalise_disk (const char *devname)
       grub_snprintf (real_canon, real_unit_str_len, "%s/disk@%s",
                      op->name, real_unit_address);
 
+      grub_free (real_unit_address);
       grub_free (canon);
       canon = real_canon;
     }
@@ -514,9 +654,18 @@ add_disk (const char *path)
   char *canon;
 
   canon = canonicalise_disk (path);
+
+  /*
+   * Not an error: canonicalise_disk() returns NULL for a devalias naming a
+   * drive that is not installed. Looking that up would reach
+   * grub_strcmp (name, NULL) by way of grub_named_list_find().
+   */
+  if (canon == NULL)
+    return ret;
+
   dev = grub_named_list_find (GRUB_AS_NAMED_LIST (disk_devs), canon);
 
-  if ((canon != NULL) && (dev == NULL))
+  if (dev == NULL)
     {
       struct disk_dev *ob_device;
 
@@ -525,7 +674,7 @@ add_disk (const char *path)
       if (ob_device == NULL)
         ret = grub_error (GRUB_ERR_OUT_OF_MEMORY, "failure to add disk");
     }
-  else if (dev != NULL)
+  else
     dev->valid = 1;
 
   grub_free (canon);
@@ -533,18 +682,63 @@ add_disk (const char *path)
 }
 
 static grub_err_t
-grub_obdisk_read (grub_disk_t disk, grub_disk_addr_t sector,
-		  grub_size_t size, char *dest)
+ensure_open (struct disk_dev *dev, const char *name)
 {
-  grub_err_t ret = GRUB_ERR_NONE;
+  grub_ieee1275_ihandle_t ihandle = 0;
+
+  if (dev->opened != 0)
+    return GRUB_ERR_NONE;
+
+  close_controller_users (dev->name, dev, NULL);
+
+  if (dev->raw_name != NULL)
+    grub_ieee1275_open (dev->raw_name, &ihandle);
+  else
+    grub_ieee1275_open (dev->name, &ihandle);
+
+  if (ihandle == 0)
+    {
+      grub_printf ("Can't open device %s\n", name);
+      return grub_error (GRUB_ERR_UNKNOWN_DEVICE, "can't open device %s", name);
+    }
+
+  dev->block_size = grub_ieee1275_get_block_size (ihandle);
+  dev->num_blocks = grub_ieee1275_num_blocks (ihandle);
+
+  if (dev->num_blocks == 0)
+    dev->num_blocks = grub_ieee1275_num_blocks64 (ihandle);
+
+  if (dev->num_blocks == 0)
+    dev->num_blocks = GRUB_DISK_SIZE_UNKNOWN;
+
+  if (dev->block_size != 0)
+    dev->log_sector_size = grub_log2ull (dev->block_size);
+  else
+    dev->log_sector_size = 9;
+
+  dev->ihandle = ihandle;
+  dev->opened = 1;
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
+obdisk_prepare (grub_disk_t disk, grub_disk_addr_t sector,
+                struct disk_dev **devp)
+{
   struct disk_dev *dev;
   unsigned long long pos;
   grub_ssize_t result = 0;
+  grub_err_t err;
 
   if (disk->data == NULL)
     return grub_error (GRUB_ERR_BAD_DEVICE, "invalid disk data");
 
-  dev = (struct disk_dev *)disk->data;
+  dev = (struct disk_dev *) disk->data;
+  err = ensure_open (dev, disk->name);
+
+  if (err != GRUB_ERR_NONE)
+    return err;
+
   pos = sector << disk->log_sector_size;
   grub_ieee1275_seek (dev->ihandle, pos, &result);
 
@@ -555,6 +749,22 @@ grub_obdisk_read (grub_disk_t disk, grub_disk_addr_t sector,
                          (long long) sector);
     }
 
+  *devp = dev;
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
+grub_obdisk_read (grub_disk_t disk, grub_disk_addr_t sector,
+		  grub_size_t size, char *dest)
+{
+  struct disk_dev *dev;
+  grub_ssize_t result = 0;
+  grub_err_t err;
+
+  err = obdisk_prepare (disk, sector, &dev);
+
+  if (err != GRUB_ERR_NONE)
+    return err;
   grub_ieee1275_read (dev->ihandle, dest, size << disk->log_sector_size,
                       &result);
 
@@ -566,12 +776,57 @@ grub_obdisk_read (grub_disk_t disk, grub_disk_addr_t sector,
                          (unsigned long long) sector,
                          disk->name);
     }
-  return ret;
+
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
+grub_obdisk_write (grub_disk_t disk, grub_disk_addr_t sector,
+		   grub_size_t size, const char *src)
+{
+  struct disk_dev *dev;
+  grub_ssize_t result = 0;
+  grub_err_t err;
+
+  err = obdisk_prepare (disk, sector, &dev);
+
+  if (err != GRUB_ERR_NONE)
+    return err;
+
+  grub_ieee1275_write (dev->ihandle, src, size << disk->log_sector_size,
+                       &result);
+
+  if (result != (grub_ssize_t) (size << disk->log_sector_size))
+    {
+      dev->opened = 0;
+      return grub_error (GRUB_ERR_WRITE_ERROR, N_("failure writing sector 0x%llx "
+                                                  "to `%s'"),
+                         (unsigned long long) sector,
+                         disk->name);
+    }
+
+  dev->dirty = 1;
+  return GRUB_ERR_NONE;
 }
 
 static void
 grub_obdisk_close (grub_disk_t disk)
 {
+  struct disk_dev *dev = (struct disk_dev *) disk->data;
+
+  /*
+   * Data written through the firmware is not guaranteed to have reached the
+   * medium until the instance is closed, and obdisk otherwise keeps a
+   * device open for the rest of the session. A write would then survive
+   * only if something closed the device afterwards: booting an entry does,
+   * by way of grub_obdisk_fini(), but a save_env at the command line does
+   * not, and its data was lost when the machine was reset. Release a device
+   * that has been written to; ensure_open() opens it again if it is used
+   * later.
+   */
+  if (dev != NULL && dev->dirty != 0)
+    close_disk (dev);
+
   grub_memset (disk, 0, sizeof (*disk));
 }
 
@@ -660,6 +915,8 @@ scan_sparc_sas_2cell (struct parent_dev *op)
           add_disk (buf);
         }
     }
+
+  grub_free (buf);
 }
 
 static void
@@ -998,10 +1255,29 @@ grub_obdisk_iterate (grub_disk_dev_iterate_hook_t hook, void *hook_data,
   struct disk_dev *dev;
   const char *name;
 
+  /*
+   * Enumerating is expensive: every controller is opened and every target on
+   * it probed, which is thirty firmware calls on a two channel SCSI
+   * controller and sixty four decode-unit and encode-unit calls on a SAS
+   * one. This is called once for each consumer of the device list, and some
+   * of them iterate repeatedly - a search without a hint sweeps every
+   * device, and diskfilter walks them all again looking for members - so
+   * enumerating on every call cost minutes of firmware traffic for a single
+   * search on a Sun Fire V240.
+   *
+   * Enumerating on GRUB_DISK_PULL_RESCAN instead, so that a device
+   * appearing mid-session would still be found, was tried and brought the
+   * cost straight back: every consumer is offered each pull level in turn.
+   *
+   * A device that appears mid-session is therefore not picked up by an
+   * iteration. find_grub_devpath() still enumerates when a name cannot be
+   * found, so one asked for by name is found as before.
+   */
   if (pull != GRUB_DISK_PULL_NONE)
     return 0;
 
-  enumerate_devices ();
+  if (disks_enumerated == 0)
+    enumerate_devices ();
 
   FOR_LIST_ELEMENTS (dev, disk_devs)
     {
@@ -1023,8 +1299,8 @@ grub_obdisk_iterate (grub_disk_dev_iterate_hook_t hook, void *hook_data,
 static grub_err_t
 grub_obdisk_open (const char *name, grub_disk_t disk)
 {
-  grub_ieee1275_ihandle_t ihandle = 0;
   struct disk_dev *dev = NULL;
+  grub_err_t err;
 
   if (grub_strncmp (name, IEEE1275_DEV, sizeof (IEEE1275_DEV) - 1) != 0)
     return grub_error (GRUB_ERR_UNKNOWN_DEVICE, "not IEEE1275 device");
@@ -1037,36 +1313,10 @@ grub_obdisk_open (const char *name, grub_disk_t disk)
       return grub_error (GRUB_ERR_UNKNOWN_DEVICE, "%s", name);
     }
 
-  if (dev->opened == 0)
-    {
-      if (dev->raw_name != NULL)
-        grub_ieee1275_open (dev->raw_name, &ihandle);
-      else
-        grub_ieee1275_open (dev->name, &ihandle);
+  err = ensure_open (dev, name);
 
-      if (ihandle == 0)
-        {
-          grub_printf ("Can't open device %s\n", name);
-          return grub_error (GRUB_ERR_UNKNOWN_DEVICE, "can't open device %s", name);
-        }
-
-      dev->block_size = grub_ieee1275_get_block_size (ihandle);
-      dev->num_blocks = grub_ieee1275_num_blocks (ihandle);
-
-      if (dev->num_blocks == 0)
-        dev->num_blocks = grub_ieee1275_num_blocks64 (ihandle);
-
-      if (dev->num_blocks == 0)
-        dev->num_blocks = GRUB_DISK_SIZE_UNKNOWN;
-
-      if (dev->block_size != 0)
-        dev->log_sector_size = grub_log2ull (dev->block_size);
-      else
-        dev->log_sector_size = 9;
-
-      dev->ihandle = ihandle;
-      dev->opened = 1;
-    }
+  if (err != GRUB_ERR_NONE)
+    return err;
 
   disk->total_sectors = dev->num_blocks;
   disk->id = dev->ihandle;
@@ -1084,6 +1334,7 @@ static struct grub_disk_dev grub_obdisk_dev =
     .disk_open    = grub_obdisk_open,
     .disk_close   = grub_obdisk_close,
     .disk_read    = grub_obdisk_read,
+    .disk_write   = grub_obdisk_write,
   };
 
 void

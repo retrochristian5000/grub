@@ -75,6 +75,10 @@ grub_disk_write (grub_disk_t disk, grub_disk_addr_t sector,
 
   grub_dprintf ("disk", "Writing `%s'...\n", disk->name);
 
+  if (disk->dev->disk_write == NULL)
+    return grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
+		       N_("`%s' does not support writing"), disk->name);
+
   if (grub_disk_adjust_range (disk, &sector, &offset, size) != GRUB_ERR_NONE)
     return -1;
 
