@@ -107,6 +107,99 @@ close_disk (struct disk_dev *dev)
   grub_disk_cache_invalidate_all ();
 }
 
+/* Release a controller, so that open_parent() opens it again when needed. */
+static void
+close_parent (struct parent_dev *op)
+{
+  if (op->ihandle == 0)
+    return;
+
+  grub_ieee1275_close (op->ihandle);
+  op->ihandle = 0;
+}
+
+/* Length of the controller part of a device name, without its unit address. */
+static grub_size_t
+controller_len (const char *name)
+{
+  const char *unit = grub_strstr (name, IEEE1275_DISK_ALIAS);
+
+  return (unit != NULL) ? (grub_size_t) (unit - name) : grub_strlen (name);
+}
+
+static int
+single_instance_wanted (void)
+{
+  const char *value = grub_env_get ("obdisk_single_instance");
+
+  if (value == NULL)
+    return 0;
+
+  return (grub_strcmp (value, "1") == 0 || grub_strcmp (value, "on") == 0
+          || grub_strcmp (value, "yes") == 0
+          || grub_strcmp (value, "true") == 0);
+}
+
+/*
+ * Some firmware allows only one open instance per disk controller, counting
+ * both an open target and the controller node itself. Opening a second one
+ * faults inside the firmware driver and the machine drops to the OpenBoot
+ * prompt reporting "Fast Data Access MMU Miss". This has been seen on the
+ * OpenBoot 4.30 era LSI SCSI controller of a Sun Fire V240 and reported on a
+ * Sun Fire T2000, while the later OpenBoot of an UltraSPARC T4 has no such
+ * limit. Opening and closing the same devices one after another is fine.
+ *
+ * Since obdisk otherwise keeps every device open, booting from one disk and
+ * then referring to another on the same controller is enough to reach the
+ * fault: a bare "ls" does it, and so does the search in a generated
+ * grub.cfg once its hints have been exhausted.
+ *
+ * Release what is held on one controller before opening something else on
+ * it. Devices on other controllers are left alone; they do not conflict,
+ * and closing them would mean reopening a controller every time GRUB moved
+ * between them.
+ *
+ * This is not done unless asked for, because closing is not free: opening a
+ * SAS target on an UltraSPARC T4 takes about ten seconds, so releasing a
+ * disk that GRUB is about to want again turned a device scan of five
+ * seconds into minutes there. The firmware cannot be asked whether it has
+ * the limit - exceeding it faults the machine rather than returning an
+ * error - so a machine that needs this sets obdisk_single_instance in its
+ * own grub.cfg, which it can do because booting already works: the hints in
+ * a generated configuration keep the search from reaching a second disk.
+ */
+static void
+close_controller_users (const char *controller, struct disk_dev *keep_disk,
+                        struct parent_dev *keep_parent)
+{
+  grub_size_t clen;
+  struct disk_dev *dev;
+  struct parent_dev *op;
+
+  if (single_instance_wanted () == 0)
+    return;
+
+  clen = controller_len (controller);
+
+  FOR_LIST_ELEMENTS (dev, disk_devs)
+    if (dev != keep_disk && dev->opened != 0
+        && controller_len (dev->name) == clen
+        && grub_memcmp (dev->name, controller, clen) == 0)
+      {
+        grub_dprintf ("obdisk", "closing disk %s\n", dev->name);
+        close_disk (dev);
+      }
+
+  FOR_LIST_ELEMENTS (op, parent_devs)
+    if (op != keep_parent && op->ihandle != 0
+        && grub_strlen (op->name) == clen
+        && grub_memcmp (op->name, controller, clen) == 0)
+      {
+        grub_dprintf ("obdisk", "closing controller %s\n", op->name);
+        close_parent (op);
+      }
+}
+
 static char *
 strip_ob_partition (char *path)
 {
@@ -283,6 +376,7 @@ open_new_parent (const char *parent)
   if (op == NULL)
     return NULL;
 
+  close_controller_users (parent, NULL, NULL);
   grub_ieee1275_open (parent, &ihandle);
 
   if (ihandle == 0)
@@ -332,6 +426,22 @@ open_parent (const char *parent)
 
       if (op != NULL)
         grub_list_push (GRUB_AS_LIST_P (&parent_devs), GRUB_AS_LIST (op));
+    }
+  else if (op->ihandle == 0)
+    {
+      grub_ieee1275_ihandle_t ihandle = 0;
+
+      close_controller_users (parent, NULL, op);
+      grub_ieee1275_open (parent, &ihandle);
+
+      if (ihandle == 0)
+        {
+          grub_error (GRUB_ERR_BAD_DEVICE, "unable to reopen %s", parent);
+          grub_print_error ();
+          return NULL;
+        }
+
+      op->ihandle = ihandle;
     }
 
   return op;
@@ -578,6 +688,8 @@ ensure_open (struct disk_dev *dev, const char *name)
 
   if (dev->opened != 0)
     return GRUB_ERR_NONE;
+
+  close_controller_users (dev->name, dev, NULL);
 
   if (dev->raw_name != NULL)
     grub_ieee1275_open (dev->raw_name, &ihandle);
