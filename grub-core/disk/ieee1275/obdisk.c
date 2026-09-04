@@ -788,6 +788,8 @@ scan_sparc_sas_2cell (struct parent_dev *op)
           add_disk (buf);
         }
     }
+
+  grub_free (buf);
 }
 
 static void
