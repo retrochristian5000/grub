@@ -541,9 +541,18 @@ add_disk (const char *path)
   char *canon;
 
   canon = canonicalise_disk (path);
+
+  /*
+   * Not an error: canonicalise_disk() returns NULL for a devalias naming a
+   * drive that is not installed. Looking that up would reach
+   * grub_strcmp (name, NULL) by way of grub_named_list_find().
+   */
+  if (canon == NULL)
+    return ret;
+
   dev = grub_named_list_find (GRUB_AS_NAMED_LIST (disk_devs), canon);
 
-  if ((canon != NULL) && (dev == NULL))
+  if (dev == NULL)
     {
       struct disk_dev *ob_device;
 
@@ -552,7 +561,7 @@ add_disk (const char *path)
       if (ob_device == NULL)
         ret = grub_error (GRUB_ERR_OUT_OF_MEMORY, "failure to add disk");
     }
-  else if (dev != NULL)
+  else
     dev->valid = 1;
 
   grub_free (canon);
