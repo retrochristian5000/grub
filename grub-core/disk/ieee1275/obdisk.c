@@ -274,6 +274,7 @@ open_new_parent (const char *parent)
     {
       grub_error (GRUB_ERR_BAD_DEVICE, "unable to get parent %s", parent);
       grub_print_error ();
+      grub_ieee1275_close (ihandle);
       free_parent_dev (op);
       return NULL;
     }
