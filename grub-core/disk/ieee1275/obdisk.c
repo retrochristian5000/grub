@@ -46,6 +46,7 @@ struct disk_dev
   grub_uint64_t           num_blocks;
   unsigned int            log_sector_size;
   grub_uint32_t           opened;
+  grub_uint32_t           dirty;
   grub_uint32_t           valid;
   grub_uint32_t           boot_dev;
 };
@@ -83,6 +84,28 @@ static const char *block_blacklist[] = {
 };
 
 #define STRCMP(a, b) ((a) && (b) && (grub_strcmp (a, b) == 0))
+
+/* Release a device, so that it is opened again the next time it is used. */
+static void
+close_disk (struct disk_dev *dev)
+{
+  if (dev->opened == 0)
+    return;
+
+  grub_ieee1275_close (dev->ihandle);
+  dev->ihandle = 0;
+  dev->opened = 0;
+  dev->dirty = 0;
+
+  /*
+   * A disk is identified to the block cache by its instance handle, and the
+   * firmware reuses handle values, so an entry cached before this device was
+   * released could be matched against a different device that is later given
+   * the same handle. Drop the cache rather than serve one disk's sectors as
+   * another's.
+   */
+  grub_disk_cache_invalidate_all ();
+}
 
 static char *
 strip_ob_partition (char *path)
@@ -655,12 +678,28 @@ grub_obdisk_write (grub_disk_t disk, grub_disk_addr_t sector,
                          disk->name);
     }
 
+  dev->dirty = 1;
   return GRUB_ERR_NONE;
 }
 
 static void
 grub_obdisk_close (grub_disk_t disk)
 {
+  struct disk_dev *dev = (struct disk_dev *) disk->data;
+
+  /*
+   * Data written through the firmware is not guaranteed to have reached the
+   * medium until the instance is closed, and obdisk otherwise keeps a
+   * device open for the rest of the session. A write would then survive
+   * only if something closed the device afterwards: booting an entry does,
+   * by way of grub_obdisk_fini(), but a save_env at the command line does
+   * not, and its data was lost when the machine was reset. Release a device
+   * that has been written to; ensure_open() opens it again if it is used
+   * later.
+   */
+  if (dev != NULL && dev->dirty != 0)
+    close_disk (dev);
+
   grub_memset (disk, 0, sizeof (*disk));
 }
 
