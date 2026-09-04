@@ -440,6 +440,7 @@ canonicalise_disk (const char *devname)
       if (grub_add (grub_strlen (op->name), sizeof (IEEE1275_DISK_ALIAS), &real_unit_str_len) ||
 	  grub_add (real_unit_str_len, grub_strlen (real_unit_address), &real_unit_str_len))
 	{
+	  grub_free (real_unit_address);
 	  grub_free (parent);
 	  grub_error (GRUB_ERR_OUT_OF_RANGE, N_("overflow detected while obtaining size of canonical name"));
 	  grub_print_error ();
@@ -449,6 +450,7 @@ canonicalise_disk (const char *devname)
       real_canon = grub_malloc (real_unit_str_len);
       if (real_canon == NULL)
 	{
+	  grub_free (real_unit_address);
 	  grub_free (parent);
 	  grub_print_error ();
 	  return NULL;
@@ -457,6 +459,7 @@ canonicalise_disk (const char *devname)
       grub_snprintf (real_canon, real_unit_str_len, "%s/disk@%s",
                      op->name, real_unit_address);
 
+      grub_free (real_unit_address);
       grub_free (canon);
       canon = real_canon;
     }
