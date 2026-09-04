@@ -191,6 +191,7 @@ grub_file_is_not_garbage ()
     case "$1" in
       *.dpkg-*) return 1 ;; # debian dpkg
       *.rpmsave|*.rpmnew) return 1 ;;
+      *.png|*.bmp|*.ico) return 1 ;;
       README*|*/README*)  return 1 ;; # documentation
       *.sig) return 1 ;; # signatures
     esac
