@@ -1,5 +1,6 @@
 name: WHP LLVM target toolchain repair
 
+# Activation touch: the workflow now exists on the default branch.
 on:
   push:
     branches:
