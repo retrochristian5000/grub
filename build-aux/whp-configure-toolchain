@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Configure GRUB with an explicit target-toolchain family.
+#
+# This frontend keeps compiler-family policy in the GRUB source tree instead
+# of forcing downstream build systems to duplicate the TARGET_* contract.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+CONFIGURE="$SOURCE_DIR/configure"
+TOOLCHAIN=auto
+TARGET_ALIAS=
+ARGS=()
+
+for arg in "$@"; do
+    case "$arg" in
+        --with-target-toolchain=*)
+            TOOLCHAIN="${arg#*=}"
+            ;;
+        --target=*)
+            TARGET_ALIAS="${arg#*=}"
+            ARGS+=("$arg")
+            ;;
+        *)
+            ARGS+=("$arg")
+            ;;
+    esac
+done
+
+case "$TOOLCHAIN" in
+    auto|gnu|llvm) ;;
+    *)
+        printf 'error: unsupported target toolchain %q; expected auto, gnu, or llvm\n' \
+            "$TOOLCHAIN" >&2
+        exit 2
+        ;;
+esac
+
+[[ -x "$CONFIGURE" ]] || {
+    printf 'error: generated GRUB configure script is missing: %s\n' "$CONFIGURE" >&2
+    printf 'hint: run ./bootstrap before %s\n' "${0##*/}" >&2
+    exit 1
+}
+
+append_target()
+{
+    local name="$1"
+    local value="${!name-}"
+
+    [[ -n "$TARGET_ALIAS" ]] || return 0
+    case " $value " in
+        *" --target="*|*" -target "*) return 0 ;;
+    esac
+    printf -v "$name" '%s' "${value:+$value }--target=$TARGET_ALIAS"
+}
+
+if [[ "$TOOLCHAIN" == llvm ]]; then
+    : "${TARGET_CC:=clang}"
+    : "${TARGET_OBJCOPY:=llvm-objcopy}"
+    : "${TARGET_STRIP:=llvm-strip}"
+    : "${TARGET_NM:=llvm-nm}"
+    : "${TARGET_RANLIB:=llvm-ranlib}"
+
+    append_target TARGET_CFLAGS
+    append_target TARGET_CPPFLAGS
+    append_target TARGET_CCASFLAGS
+    append_target TARGET_LDFLAGS
+
+    case " ${TARGET_LDFLAGS-} " in
+        *" -fuse-ld="*) ;;
+        *) TARGET_LDFLAGS="${TARGET_LDFLAGS:+$TARGET_LDFLAGS }-fuse-ld=lld" ;;
+    esac
+
+    export TARGET_CC TARGET_OBJCOPY TARGET_STRIP TARGET_NM TARGET_RANLIB
+    export TARGET_CFLAGS TARGET_CPPFLAGS TARGET_CCASFLAGS TARGET_LDFLAGS
+fi
+
+export GRUB_TARGET_TOOLCHAIN="$TOOLCHAIN"
+exec "$CONFIGURE" "${ARGS[@]}"
