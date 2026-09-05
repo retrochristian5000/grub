@@ -31,7 +31,6 @@ chmod +x "$SCRATCH/src/configure"
 log="$SCRATCH/llvm.log"
 WHP_TOOLCHAIN_LOG="$log" \
 TARGET_NM=/whp/custom/llvm-nm \
-TARGET_CFLAGS='-Os' \
     "$SCRATCH/src/build-aux/whp-configure-toolchain" \
         --with-target-toolchain=llvm \
         --target=i386-none-elf \
@@ -61,7 +60,7 @@ TARGET_OBJCOPY=/whp/bin/llvm-objcopy \
 TARGET_STRIP=/whp/bin/llvm-strip \
 TARGET_NM=/whp/bin/llvm-nm \
 TARGET_RANLIB=/whp/bin/llvm-ranlib \
-TARGET_CFLAGS='--target=i386-none-elf -Os' \
+TARGET_CFLAGS='--target=i386-none-elf -O2' \
 TARGET_CPPFLAGS='--target=i386-none-elf' \
 TARGET_CCASFLAGS='--target=i386-none-elf' \
 TARGET_LDFLAGS='--target=i386-none-elf -fuse-ld=/whp/bin/ld.lld' \
@@ -74,7 +73,7 @@ grep -Fxq 'TARGET_OBJCOPY=/whp/bin/llvm-objcopy' "$log"
 grep -Fxq 'TARGET_STRIP=/whp/bin/llvm-strip' "$log"
 grep -Fxq 'TARGET_NM=/whp/bin/llvm-nm' "$log"
 grep -Fxq 'TARGET_RANLIB=/whp/bin/llvm-ranlib' "$log"
-grep -Fxq 'TARGET_CFLAGS=--target=i386-none-elf -Os' "$log"
+grep -Fxq 'TARGET_CFLAGS=--target=i386-none-elf -O2' "$log"
 grep -Fxq 'TARGET_LDFLAGS=--target=i386-none-elf -fuse-ld=/whp/bin/ld.lld' "$log"
 
 log="$SCRATCH/gnu.log"

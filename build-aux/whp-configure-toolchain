@@ -61,6 +61,11 @@ if [[ "$TOOLCHAIN" == llvm ]]; then
     : "${TARGET_NM:=llvm-nm}"
     : "${TARGET_RANLIB:=llvm-ranlib}"
 
+    # Preserve configure.ac's historical default before adding a target flag;
+    # otherwise --target alone would make TARGET_CFLAGS non-empty and suppress
+    # GRUB's normal -Os initialization.
+    : "${TARGET_CFLAGS:=-Os}"
+
     append_target TARGET_CFLAGS
     append_target TARGET_CPPFLAGS
     append_target TARGET_CCASFLAGS
