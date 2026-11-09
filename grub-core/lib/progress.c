@@ -54,7 +54,7 @@ grub_file_progress_hook_real (grub_disk_addr_t sector __attribute__ ((unused)),
   now = grub_get_time_ms ();
 
   if (((now - last_progress_update_time > UPDATE_INTERVAL) &&
-       (file->progress_offset - file->offset > 0)) ||
+       (file->progress_offset > file->offset)) ||
       (file->progress_offset == file->size))
     {
       static char buffer[80];
